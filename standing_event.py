@@ -29,9 +29,24 @@ def page(title):
     return '''\
 <html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>%s</title>''' % (
-    html_escape(APP_TITLE + (
-        (': ' + title) if title else '')))
+<style>
+* {
+  font-family: sans-serif;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+}
+h1 {
+  margin: 5px;
+}
+input, select, button {
+  padding: 10px;
+  margin: 5px;
+  font-size: 120%%;
+}
+</style>
+<title>%s%s</title>''' % (
+    APP_TITLE, (': ' + title) if title else '')
 
 def selection_partial():
     return '''\
@@ -60,7 +75,7 @@ def index():
     return page(title=None) + '''
 <h1>Create a Standing Event</h1>
 <form action=create method=post>
-Title: <input type=text name=title></text>
+<input type=text name=title placeholder=Title></text>
 <br><br>
 <div id=selections>
 %s
@@ -68,8 +83,9 @@ Title: <input type=text name=title></text>
 <br>
 <button type=button onclick='add_another()'>add another</button>
 <br><br>
-Email: <input type=text name=email></text>
-<input type=submit value=Create>
+<input type=text name=email placeholder=Email></input>
+<br><br>
+<input type=submit value=create></input>
 </form>
 
 <script>
@@ -101,15 +117,15 @@ def interpret_post(environ):
 
 def send_email(address, subject, body):
     send_emails([address], subject, body, {address: ''})
-        
+
 def send_emails(addresses, subject, body, recipient_variables):
-    data = {"from": "Mailgun Sandbox <postmaster@sandboxbe1d96b5fe534f3793d7e679fb6177ad.mailgun.org>",
+    data = {"from": "Standing Event <jeff@jefftk.com>",
             "to": addresses,
             "subject": subject,
             "text": body,
             "recipient-variables": json.dumps(recipient_variables)}
     r = requests.post(
-        "https://api.mailgun.net/v3/sandboxbe1d96b5fe534f3793d7e679fb6177ad.mailgun.org/messages",
+        "https://api.mailgun.net/v3/mg.jefftk.com",
         auth=("api", "key-b83c46d8d404c3391a39dc7698a4c653"),
         data=data)
     if r.status_code != 200:
@@ -118,12 +134,16 @@ def send_emails(addresses, subject, body, recipient_variables):
             r.text,
             json.dumps(data)))
 
-    
 def create(environ, db):
     data = interpret_post(environ)
 
     title, = data['title']
-    email, = data['email']
+    title = re.sub("[^A-Za-z0-9 .,]", "-", title)
+    title = re.sub("-+", "-", title)
+    title = re.sub("^-*", "", title)
+    title = re.sub("-*$", "", title)
+
+    u_email, = data['email']
     if not data['day'] or len(data['day']) != len(data['nth']):
        raise Exception('invalid nth-day pairs')
 
@@ -131,12 +151,12 @@ def create(environ, db):
 
     db.execute("INSERT into events (event_id, title, admin_email) "
                 "VALUES (%s, %s, %s)",
-                (event_id, title, email))
+                (event_id, title, u_email))
 
-    for day, nth in zip(data['day'], data['nth']):
+    for u_day, u_nth in zip(data['day'], data['nth']):
         db.execute("INSERT into recurrences (event_id, day, nth) "
                     "VALUES (%s, %s, %s)",
-                    (event_id, day, nth))
+                    (event_id, u_day, u_nth))
 
     confirm_url = link('view', event_id)
 
@@ -157,37 +177,39 @@ Sent email to %s with instructions on how to confirm your event.
 
 def join(environ, db):
     data = interpret_post(environ)
-    email, = data['email']
-    event_id, = data['event_id']
+    u_email, = data['email']
+    u_event_id, = data['event_id']
 
     db.execute('SELECT title FROM events WHERE event_id = %s',
-               (event_id, ))
+               (u_event_id, ))
     (title,), = db.fetchall()
+    event_id = u_event_id
 
     member_nonce = nonce()
 
     db.execute('INSERT INTO members (event_id, email, nonce) '
-               'VALUES (%s, %s, %s)', (event_id, email, member_nonce))
+               'VALUES (%s, %s, %s)', (event_id, u_email, member_nonce))
 
     confirm_url = link('confirm_join', member_nonce)
 
-    send_email(email, "Confirm you'd like to join %s" % title, '''\
+    send_email(u_email, "Confirm you'd like to join %s" % title, '''\
 To join the standing event %s, click:
 
     %s
 
 If you don't know what this is about, someone else must have entered
 your email.  Sorry about that!
-''' % (html_escape(title), confirm_url))
+''' % (title, confirm_url))
 
     return page('Join') + '''
 Sent email to %s with instructions on how to join %s.
-''' % (html_escape(email), html_escape(title))
+''' % (html_escape(u_email), title)
 
-def confirm_join(environ, db, member_nonce):
+def confirm_join(environ, db, u_member_nonce):
     db.execute('SELECT event_id, email FROM members WHERE nonce = %s',
-               (member_nonce, ))
-    (event_id, email), = db.fetchall()
+               (u_member_nonce, ))
+    (event_id, u_email), = db.fetchall()
+    member_nonce = u_member_nonce
 
     db.execute('UPDATE members SET confirmed = true WHERE nonce = %s',
                (member_nonce, ))
@@ -202,12 +224,13 @@ def confirm_join(environ, db, member_nonce):
 <p>
 
 To unsubscribe, <a href="%s">click here</a>.
-''' % (html_escape(email), event_link, unsubscribe)
+''' % (html_escape(u_email), event_link, unsubscribe)
 
-def unsubscribe(environ, db, member_nonce):
+def unsubscribe(environ, db, u_member_nonce):
     db.execute('SELECT event_id, email FROM members WHERE nonce = %s',
-               (member_nonce, ))
-    (event_id, email), = db.fetchall()
+               (u_member_nonce, ))
+    (event_id, u_email), = db.fetchall()
+    member_nonce = u_member_nonce
 
     db.execute('UPDATE members SET confirmed = false WHERE nonce = %s',
                (member_nonce, ))
@@ -222,7 +245,7 @@ def unsubscribe(environ, db, member_nonce):
 <p>
 
 To re-subscribe, <a href="%s">click here</a>.
-''' % (html_escape(email), event_link, confirm_url)
+''' % (html_escape(u_email), event_link, confirm_url)
 
 def matches(day_nth_pairs, consider):
     nth = {
@@ -243,10 +266,11 @@ def matches(day_nth_pairs, consider):
 
     return (day, nth) in day_nth_pairs
 
-def view(environ, db, event_id):
+def view(environ, db, u_event_id):
     db.execute('SELECT title, confirmed FROM events where event_id=%s',
-               (event_id, ))
+               (u_event_id, ))
     (title, confirmed),  = db.fetchall()
+    event_id = u_event_id
     if not confirmed:
         db.execute('UPDATE events SET confirmed=true WHERE event_id=%s',
                    (event_id, ))
@@ -254,9 +278,9 @@ def view(environ, db, event_id):
                (event_id, ))
     recurrences_raw = list(db.fetchall())
     recurrences = '<ul>%s</ul>' % '\n'.join(
-        '<li>%s %s</li>' % (html_escape(nth),
-                            html_escape(day))
-        for day, nth in recurrences_raw)
+        '<li>%s %s</li>' % (html_escape(u_nth),
+                            html_escape(u_day))
+        for u_day, u_nth in recurrences_raw)
 
     now = datetime.datetime.now()
     upcoming_dates = []
@@ -279,17 +303,17 @@ def view(environ, db, event_id):
     db.execute('SELECT email FROM members '
                'WHERE event_id=%s AND confirmed=true '
                'ORDER BY email ASC', (event_id, ))
-    member_emails = list(email for email, in db.fetchall())
+    member_emails = list(u_email for u_email, in db.fetchall())
     if member_emails:
         members = '<ul>%s</ul>' % '\n'.join(
-            '<li>%s</li>' % html_escape(email) for
-            email in member_emails)
+            '<li>%s</li>' % html_escape(u_email) for
+            u_email in member_emails)
     else:
         members = 'currently no one<br><br>'
 
     calendar_link = link('ical', event_id)
 
-    return page(html_escape(title)) + '''
+    return page(title) + '''
 <h1>%s</h1>
 Happens on:
 %s
@@ -299,34 +323,36 @@ Members:
 %s
 Calendar link: <a href="%s">ical</a><br><br>
 <form action=../join method=post>
-Email: <input type=text name=email></text>
+<input type=text name=email placeholder=Email></text>
 <input type=hidden name=event_id value="%s"></input>
-<input type=submit value=Join>
+<input type=submit value=jooin>
 ''' % (
-    html_escape(title),
+    title,
     recurrences,
     upcoming,
     members,
     calendar_link,
     event_id)
 
-def view_date(environ, db, event_id, date):
+def view_date(environ, db, u_event_id, u_date):
     db.execute('SELECT title FROM events WHERE event_id=%s',
-               (event_id, ))
+               (u_event_id, ))
     (title, ), = db.fetchall()
+    event_id = u_event_id
 
     db.execute('SELECT email, attending, comment FROM rsvps '
                'WHERE event_id=%s AND date=%s '
-               'ORDER by email ASC', (event_id, date))
+               'ORDER by email ASC', (event_id, u_date))
     rsvps = ['<li><p>%s: %s%s' % (
-        html_escape(email),
+        html_escape(u_email),
         'Yes' if attending else 'No',
-        ('<blockquote><i>%s</i></blockquote>' % html_escape(comment)
-         if comment else ''))
-             for email, attending, comment in db.fetchall()]
-    return page(html_escape('%s on %s' % (title, date))) + '''
+        ('<blockquote><i>%s</i></blockquote>' % html_escape(u_comment)
+         if u_comment else ''))
+             for u_email, attending, u_comment in db.fetchall()]
+    date = html_escape(u_date)
+    return page('%s on %s' % (title, date)) + '''
 <h1>%s rsvps for %s</h1>
-<ul>%s</ul>''' % (html_escape(title), html_escape(date), '\n'.join(rsvps))
+<ul>%s</ul>''' % (title, date, '\n'.join(rsvps))
 
 def send_emails_for_today():
     with psycopg2.connect(
@@ -341,11 +367,10 @@ def send_emails_for_today():
             db.execute('SELECT event_id, day, nth from recurrences')
             to_send_event_ids = set(
                 event_id
-                for event_id, day, nth in db.fetchall()
-                if matches([(day, nth)], advance))
+                for event_id, u_day, u_nth in db.fetchall()
+                if matches([(u_day, u_nth)], advance))
 
             for event_id in to_send_event_ids:
-                print(event_id)
                 db.execute('SELECT title FROM events WHERE event_id=%s',
                            (event_id, ))
                 (title, ), = db.fetchall()
@@ -354,58 +379,55 @@ def send_emails_for_today():
                            'WHERE confirmed = true AND event_id = %s',
                            (event_id, ))
                 recipient_variables = dict(
-                    (email, {'member_nonce': member_nonce})
-                    for email, member_nonce in db.fetchall())
+                    (u_email, {'member_nonce': member_nonce})
+                    for u_email, member_nonce in db.fetchall())
 
-                import pprint
-                pprint.pprint(recipient_variables)
-
-            s_title = html_escape(title)
-            s_day = advance.strftime('%A')
+            day = advance.strftime('%A')
             send_emails(list(recipient_variables.keys()),
-                        'Reminder: %s is this %s; rsvp?' % (s_title, s_day),
+                        'Reminder: %s is this %s; rsvp?' % (title, day),
                         '''\
 %s is this %s.  RSVP:
 
-    %s''' % (s_title, s_day, link('rsvp', advance_date,
-                                  '%recipient.member_nonce%')),
+    %s''' % (title, day, link('rsvp', advance_date,
+                              '%recipient.member_nonce%')),
                         recipient_variables)
 
 
-def rsvp(environ, db, date, member_nonce):
+def rsvp(environ, db, u_date, u_member_nonce):
     db.execute('SELECT event_id, email FROM members WHERE nonce = %s',
-               (member_nonce, ))
-    (event_id, email), = db.fetchall()
+               (u_member_nonce, ))
+    (event_id, u_email), = db.fetchall()
+    member_nonce = u_member_nonce
 
+    date = html_escape(u_date)
     if environ['CONTENT_LENGTH'] and int(environ['CONTENT_LENGTH']) > 0:
         data = interpret_post(environ)
-        attending, = data['attending']
+        u_attending, = data['attending']
 
         if 'comment' in data:
-            comment, = data['comment']
+            u_comment, = data['comment']
         else:
-            comment = None
+            u_comment = None
 
         db.execute('DELETE FROM rsvps WHERE event_id = %s and email = %s', (
-            event_id, email))
+            event_id, u_email))
         db.execute('INSERT INTO rsvps '
                    '(event_id, email, date, attending, comment) '
                    'VALUES (%s, %s, %s, %s, %s)', (
-                       event_id, email, date, attending == 'yes', comment))
-        return page('RSVPd for %s' % html_escape(date)) + '''\
+                       event_id, u_email, u_date, u_attending == 'yes',
+                       u_comment))
+        return page('RSVPd for %s' % date) + '''\
 <h1>RSVPd %s for %s</h1>
 
 See <a href="%s">others' RSVPs</a>
-''' % ('Yes' if attending == 'yes' else 'No',
-       html_escape(date),
-       link('view_date', event_id, html_escape(date)))
+''' % ('Yes' if u_attending == 'yes' else 'No',
+       date, link('view_date', event_id, date))
 
     else:
         db.execute('SELECT title FROM events WHERE event_id = %s',
                    (event_id, ))
         (title, ), = db.fetchall()
-        s_title = html_escape(title)
-        return page('RSVP for %s on %s' % (s_title, html_escape(date))) + '''\
+        return page('RSVP for %s on %s' % (title, date)) + '''\
 <h1>RSVP for %s on %s</h1>
 <form method=post>
 <input type=radio name=attending value=yes>Yes</input><br>
@@ -414,16 +436,17 @@ See <a href="%s">others' RSVPs</a>
 <input type=text name=comment placeholder=Comments></input><br>
 <br>
 <input type=submit value=RSVP></submit>
-''' % (s_title, html_escape(date))
+''' % (title, date)
 
-def ical(environ, db, event_id):
+def ical(environ, db, u_event_id):
     db.execute('SELECT title FROM events where event_id=%s',
-               (event_id, ))
+               (u_event_id, ))
     (title, ),  = db.fetchall()
+    event_id = u_event_id
 
     db.execute('SELECT day, nth FROM recurrences WHERE event_id=%s',
                (event_id, ))
-    recurrences_raw = list(db.fetchall())
+    u_recurrences_raw = list(db.fetchall())
 
     now = datetime.datetime.now()
     upcoming_dates = []
@@ -431,13 +454,8 @@ def ical(environ, db, event_id):
     # Select up all occurrences in next 90 days.
     for i in range(90):
         consider = now + datetime.timedelta(days=i)
-        if matches(recurrences_raw, consider):
+        if matches(u_recurrences_raw, consider):
             upcoming_dates.append(consider.strftime('%Y%m%d'))
-
-    title = re.sub("[^A-Za-z0-9 .,]", "-", title)
-    title = re.sub("-+", "-", title)
-    title = re.sub("^-*", "", title)
-    title = re.sub("-*$", "", title)
 
     return '''\
 BEGIN:VCALENDAR
