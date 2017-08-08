@@ -345,6 +345,8 @@ def view(environ, db, u_event_id_or_member_nonce):
         note = '''\
 <i>%s receives email reminders for this event. To unsubscribe, <a href="%s">click here</a></i>.<p>
 ''' % (html_escape(u_email), unsubscribe)
+    else:
+        member_nonce = None
 
     db.execute('SELECT title, confirmed FROM events where event_id=%s',
                (u_event_id, ))
@@ -361,6 +363,7 @@ def view(environ, db, u_event_id_or_member_nonce):
                             html_escape(u_day))
         for u_day, u_nth in recurrences_raw)
 
+
     now = datetime.datetime.now()
     upcoming_dates = []
 
@@ -374,12 +377,11 @@ def view(environ, db, u_event_id_or_member_nonce):
             upcoming_dates.append(consider.strftime('%F'))
 
     upcoming = '<ul>%s</ul>' % '\n'.join(
-        '<li><a href="%s">%s</a>%s</li>' % (
-            link('view_date', event_id, upcoming_date),
+        '<li>%s%s%s</li>' % (
+            '<a href="%s">' % link('rsvp', upcoming_date,
+                                   member_nonce) if member_nonce else '',
             upcoming_date,
-            ' (<a href="%s">rsvp</a>)' % link(
-                'rsvp', upcoming_date, member_nonce)
-            if member_nonce else '')
+            '</a>' if member_nonce else '')
         for upcoming_date in upcoming_dates)
 
     db.execute('SELECT email FROM members '
@@ -415,30 +417,6 @@ Calendar link: <a href="%s">ical</a><br><br>
     members,
     calendar_link,
     event_id))
-
-def view_date(environ, db, u_event_id, u_date):
-    db.execute('SELECT title FROM events WHERE event_id=%s',
-               (u_event_id, ))
-    (title, ), = db.fetchall()
-    event_id = u_event_id
-
-    db.execute('SELECT email, attending, comment FROM rsvps '
-               'WHERE event_id=%s AND date=%s '
-               'ORDER by email ASC', (event_id, u_date))
-    rsvps = ['<li><p>%s: %s%s' % (
-        html_escape(u_email),
-        'Yes' if attending else 'No',
-        ('<blockquote><i>%s</i></blockquote>' % html_escape(u_comment)
-         if u_comment else ''))
-             for u_email, attending, u_comment in db.fetchall()]
-    date = html_escape(u_date)
-
-    if rsvps:
-        body = '<ul>%s</ul>' % '\n'.join(rsvps)
-    else:
-        body = 'No RSVPs yet.'
-
-    return page('%s<br>RSVPs for %s' % (title, date), body)
 
 def send_emails_for_today():
     with psycopg2.connect(
@@ -493,6 +471,7 @@ def rsvp(environ, db, u_date, u_member_nonce):
     member_nonce = u_member_nonce
 
     date = html_escape(u_date)
+    note = ''
     if environ['CONTENT_LENGTH'] and int(environ['CONTENT_LENGTH']) > 0:
         data = interpret_post(environ)
         u_attending, = data['attending']
@@ -509,24 +488,54 @@ def rsvp(environ, db, u_date, u_member_nonce):
                    'VALUES (%s, %s, %s, %s, %s)', (
                        event_id, u_email, u_date, u_attending == 'yes',
                        u_comment))
-        return page('RSVPd %s for %s' % (
-            'Yes' if u_attending == 'yes' else 'No', date), '''\
-See <a href="%s">others' RSVPs</a>
-''' % (link('view_date', event_id, date)))
+        note = '<i>RSVPd %s</i><p>' % (
+            'Yes' if u_attending == 'yes' else 'No')
 
+    db.execute('SELECT attending, comment FROM rsvps '
+               ' WHERE event_id = %s'
+               '   AND email = %s'
+               '   AND date = %s',
+               (event_id, u_email, u_date))
+    results = db.fetchall()
+    if results:
+        (attending, comment), = results
     else:
-        db.execute('SELECT title FROM events WHERE event_id = %s',
-                   (event_id, ))
-        (title, ), = db.fetchall()
-        return page('RSVP for %s<br>on %s' % (title, date), '''\
+        attending = comment = None
+
+    rsvp_form = '''\
 <form method=post>
-<input type=radio name=attending value=yes>Yes</input><br>
-<input type=radio name=attending value=no>No</input><br>
+<input type=radio name=attending value=yes%s>Yes</input><br>
+<input type=radio name=attending value=no%s>No</input><br>
 <br>
-<input type=text name=comment placeholder=Comments></input><br>
+<input type=text name=comment placeholder=Comments>%s</input><br>
 <br>
 <input type=submit value=RSVP></submit>
-''')
+''' % (' checked' if attending is True else '',
+       ' checked' if attending is False else '',
+       comment or '')
+
+    db.execute('SELECT title FROM events WHERE event_id=%s',
+               (event_id, ))
+    (title, ), = db.fetchall()
+
+    db.execute('SELECT email, attending, comment FROM rsvps '
+               'WHERE event_id=%s AND date=%s '
+               'ORDER by email ASC', (event_id, u_date))
+    rsvps = ['<li><p>%s: %s%s' % (
+        html_escape(u_email),
+        'Yes' if attending else 'No',
+        ('<blockquote><i>%s</i></blockquote>' % html_escape(u_comment)
+         if u_comment else ''))
+             for u_email, attending, u_comment in db.fetchall()]
+    date = html_escape(u_date)
+
+    if rsvps:
+        current_rsvps = '<ul>%s</ul>' % '\n'.join(rsvps)
+    else:
+        current_rsvps = 'No RSVPs yet.'
+
+    return page('%s: %s' % (title, date), '%s%s<p>%s' % (
+        note, rsvp_form, current_rsvps))
 
 def ical(environ, db, u_event_id):
     db.execute('SELECT title FROM events where event_id=%s',
@@ -578,10 +587,6 @@ def route(path, environ):
             if path.startswith('/view/'):
                 u_event_id_or_member_nonce = path.split('/')[-1]
                 return view(environ, db, u_event_id_or_member_nonce)
-
-            if path.startswith('/view_date/'):
-                u_event_id, u_date = path.split('/')[-2:]
-                return view_date(environ, db, u_event_id, u_date)
 
             if path.startswith('/rsvp/'):
                 u_date, u_member_nonce = path.split('/')[-2:]
