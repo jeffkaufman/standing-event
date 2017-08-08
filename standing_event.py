@@ -10,9 +10,9 @@ import sys
 import traceback
 import urllib
 
-HOST='https://www.jefftk.com'
-DEPLOY_LOCATION='/standing-event'
-APP_TITLE='Standing Event'
+HOST='https://www.regularlyscheduled.com'
+DEPLOY_LOCATION='/'
+APP_TITLE='Regularly Scheduled'
 ADVANCE_DAYS=4
 
 def link(*components):
@@ -71,19 +71,83 @@ def selection_partial():
 </div>
 '''
 
-def index():
-    return page(title=None) + '''
-<h1>Create a Standing Event</h1>
-<form action=create method=post>
-<input type=text name=title placeholder=Title></text>
+def index(environ, db):
+    has_data = (environ['CONTENT_LENGTH'] and
+                int(environ['CONTENT_LENGTH']) > 0)
+
+    red_star = '<font color=red>*</font>'
+    title_note = selection_note = email_note = ''
+
+    missing = False
+    if has_data:
+        data = interpret_post(environ)
+
+        if 'title' not in data or len(data['title']) != 1:
+            missing = True
+            title_note = red_star
+
+        if ('email' not in data or len(data['email']) != 1 or
+            '@' not in data['email'][0]):
+            missing = True
+            email_note = red_star
+
+        if ('day' not in data or 'nth' not in data or
+            len(data['day']) == 0 or len(data['day']) != len(data['nth'])):
+            missing = True
+            selection_note = red_star
+
+    if has_data and not missing:
+        u_title, = data['title']
+        title = re.sub("[^A-Za-z0-9 .,]", "-", u_title)
+        title = re.sub("-+", "-", title)
+        title = re.sub("^-*", "", title)
+        title = re.sub("-*$", "", title)
+
+        u_email, = data['email']
+        if not data['day'] or len(data['day']) != len(data['nth']):
+            raise Exception('invalid nth-day pairs')
+
+        event_id = nonce()
+
+        db.execute("INSERT into events (event_id, title, admin_email) "
+                   "VALUES (%s, %s, %s)",
+                   (event_id, title, u_email))
+
+        for u_day, u_nth in zip(data['day'], data['nth']):
+            db.execute("INSERT into recurrences (event_id, day, nth) "
+                       "VALUES (%s, %s, %s)",
+                       (event_id, u_day, u_nth))
+
+        confirm_url = link('view', event_id)
+
+        send_email(u_email, 'Confirm your regularly scheduled event, %s' % title,
+                   '''\
+To see your regularly scheduled event, click:
+
+    %s
+
+If you didn't try to create a regularly scheduled event, someone else
+must have entered your email.  You can ignore this message.  Sorry
+about that!
+''' % confirm_url)
+
+        return page('Create') + '''
+Sent email to %s with instructions on how to confirm your event.
+''' % html_escape(u_email)
+
+    else:
+        return page(title=None) + '''
+<h1>Create a Regularly Scheduled Event</h1>
+<form method=post>
+%s<input type=text name=title placeholder=Title></text>
 <br><br>
-<div id=selections>
+%s<div id=selections>
 %s
 </div>
 <br>
 <button type=button onclick='add_another()'>add another</button>
 <br><br>
-<input type=text name=email placeholder=Email></input>
+%s<input type=text name=email placeholder=Email></input>
 <br><br>
 <input type=submit value=create></input>
 </form>
@@ -104,7 +168,10 @@ function add_another() {
 }
 
 </script>
-''' % (selection_partial().replace('{n}', '1'),
+''' % (title_note,
+       selection_note,
+       selection_partial().replace('{n}', '1'),
+       email_note,
        json.dumps(selection_partial()))
 
 def nonce():
@@ -119,13 +186,13 @@ def send_email(address, subject, body):
     send_emails([address], subject, body, {address: ''})
 
 def send_emails(addresses, subject, body, recipient_variables):
-    data = {"from": "Standing Event <jeff@jefftk.com>",
+    data = {"from": "Regularly Scheduled <jeff@jefftk.com>",
             "to": addresses,
             "subject": subject,
             "text": body,
             "recipient-variables": json.dumps(recipient_variables)}
     r = requests.post(
-        "https://api.mailgun.net/v3/mg.jefftk.com",
+        "https://api.mailgun.net/v3/mg.jefftk.com/messages",
         auth=("api", "key-b83c46d8d404c3391a39dc7698a4c653"),
         data=data)
     if r.status_code != 200:
@@ -133,47 +200,6 @@ def send_emails(addresses, subject, body, recipient_variables):
             r.status_code,
             r.text,
             json.dumps(data)))
-
-def create(environ, db):
-    data = interpret_post(environ)
-
-    title, = data['title']
-    title = re.sub("[^A-Za-z0-9 .,]", "-", title)
-    title = re.sub("-+", "-", title)
-    title = re.sub("^-*", "", title)
-    title = re.sub("-*$", "", title)
-
-    u_email, = data['email']
-    if not data['day'] or len(data['day']) != len(data['nth']):
-       raise Exception('invalid nth-day pairs')
-
-    event_id = nonce()
-
-    db.execute("INSERT into events (event_id, title, admin_email) "
-                "VALUES (%s, %s, %s)",
-                (event_id, title, u_email))
-
-    for u_day, u_nth in zip(data['day'], data['nth']):
-        db.execute("INSERT into recurrences (event_id, day, nth) "
-                    "VALUES (%s, %s, %s)",
-                    (event_id, u_day, u_nth))
-
-    confirm_url = link('view', event_id)
-
-    send_email(email, 'Confirm your standing event, %s' % title,
-               '''\
-To see your standing event, click:
-
-    %s
-
-If you didn't try to create a standing event, someone else must
-have entered your email.  You can ignore this message.  Sorry
-about that!
-''' % confirm_url)
-
-    return page('Create') + '''
-Sent email to %s with instructions on how to confirm your event.
-''' % email
 
 def join(environ, db):
     data = interpret_post(environ)
@@ -193,7 +219,7 @@ def join(environ, db):
     confirm_url = link('confirm_join', member_nonce)
 
     send_email(u_email, "Confirm you'd like to join %s" % title, '''\
-To join the standing event %s, click:
+To join the regularly scheduled event %s, click:
 
     %s
 
@@ -219,7 +245,7 @@ def confirm_join(environ, db, u_member_nonce):
 
     return page('Join Confirmed') + '''
 %s will now receive email reminders about
-<a href="%s">this standing event</a>.
+<a href="%s">this regularly scheduled event</a>.
 
 <p>
 
@@ -240,7 +266,7 @@ def unsubscribe(environ, db, u_member_nonce):
 
     return page('Unsubscription Confirmed') + '''
 %s will no longer receive email reminders about
-<a href="%s">this standing event</a>.
+<a href="%s">this regularly scheduled event</a>.
 
 <p>
 
@@ -480,10 +506,7 @@ def route(path, environ):
                             os.environ['DB_PASS'])) as conn:
         with conn.cursor() as db:
             if path == '/':
-                return index()
-
-            if path == '/create':
-                return create(environ, db)
+                return index(environ, db)
 
             if path == '/join':
                 return join(environ, db)
