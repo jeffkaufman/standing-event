@@ -1,6 +1,7 @@
 import base64
 import cgi
 import datetime
+import Cookie
 import json
 import os
 import psycopg2
@@ -227,6 +228,7 @@ def send_emails(addresses, subject, body, recipient_variables):
             "subject": subject,
             "text": body,
             "recipient-variables": json.dumps(recipient_variables)}
+
     r = requests.post(
         MAILGUN_URL,
         auth=("api", MAILGUN_API_KEY),
@@ -276,7 +278,7 @@ def unsubscribe(environ, db, u_member_nonce):
     db.execute('UPDATE members SET confirmed = false WHERE nonce = %s',
                (member_nonce, ))
 
-    event_link = link('view', event_id)
+    event_link = link('view', member_nonce)
 
     return page('Unsubscription Confirmed', '''
 %s will no longer receive email reminders about
@@ -307,34 +309,43 @@ def matches(day_nth_pairs, consider):
     return (day, nth) in day_nth_pairs
 
 def view(environ, db, u_event_id_or_member_nonce):
+
+
     db.execute('SELECT event_id, email FROM members WHERE nonce = %s',
                (u_event_id_or_member_nonce, ))
     results = db.fetchall()
 
-    note = ""
-    member_nonce = ""
-    
     if len(results) == 1:
         (event_id, u_email), = results
-        member_nonce = u_event_id_or_member_nonce
+        u_member_nonce = u_event_id_or_member_nonce
 
         db.execute('UPDATE members SET confirmed = true WHERE nonce = %s',
-                   (member_nonce, ))
+                   (u_member_nonce, ))
+        return '''\
+<meta http-equiv="set-cookie" content="id=%s">
+<meta http-equiv="refresh" content="0; url=%s">
+''' % (u_member_nonce,
+       link('view', event_id))
 
+    u_event_id = u_event_id_or_member_nonce
+
+    u_member_nonce = ''
+    if 'HTTP_COOKIE' in environ:
+        cookies = Cookie.SimpleCookie(environ['HTTP_COOKIE'])
+        if 'id' in cookies:
+            u_member_nonce = cookies['id'].value
+
+    note = ""
+    if u_member_nonce:
+        db.execute('SELECT email FROM members WHERE nonce = %s',
+                   (u_member_nonce, ))
+        (u_email, ), = db.fetchall()
+        member_nonce = u_member_nonce
         unsubscribe = link('unsubscribe', member_nonce)
-
         note = '''\
-%s will receive email reminders for this event.
-
-<p>
-
-To unsubscribe, <a href="%s">click here</a>.
+<i>%s receives email reminders for this event. To unsubscribe, <a href="%s">click here</a></i>.<p>
 ''' % (html_escape(u_email), unsubscribe)
 
-        u_event_id = event_id
-    else:
-        u_event_id = u_event_id_or_member_nonce
-        
     db.execute('SELECT title, confirmed FROM events where event_id=%s',
                (u_event_id, ))
     (title, confirmed),  = db.fetchall()
@@ -385,6 +396,7 @@ To unsubscribe, <a href="%s">click here</a>.
     calendar_link = link('ical', event_id)
 
     return page(title, '''
+%s
 Happens on:
 %s
 Upcoming dates:
@@ -397,6 +409,7 @@ Calendar link: <a href="%s">ical</a><br><br>
 <input type=hidden name=event_id value="%s"></input>
 <input type=submit value=join>
 ''' % (
+    note,
     recurrences,
     upcoming,
     members,
@@ -448,17 +461,24 @@ def send_emails_for_today():
                            (event_id, ))
                 (title, ), = db.fetchall()
 
-                db.execute('SELECT email, nonce FROM members '
-                           'WHERE confirmed = true AND event_id = %s',
-                           (event_id, ))
+                db.execute('SELECT email, nonce FROM members'
+                           ' WHERE confirmed = true'
+                           '   AND event_id = %s'
+                           '   AND email NOT IN ('
+                           '   SELECT email FROM rsvps'
+                           '    WHERE event_id = %s'
+                           '      AND date = %s)',
+                           (event_id, event_id, advance_date))
+
                 recipient_variables = dict(
                     (u_email, {'member_nonce': member_nonce})
                     for u_email, member_nonce in db.fetchall())
-
-                day = advance.strftime('%A')
-                send_emails(list(recipient_variables.keys()),
-                            'Reminder: %s is this %s; rsvp?' % (title, day),
-                            '''\
+                if recipient_variables:
+                    day = advance.strftime('%A')
+                    send_emails(list(recipient_variables.keys()),
+                                'Reminder: %s is this %s; rsvp?' % (
+                                    title, day),
+                                '''\
 %s is this %s.  RSVP:
 
     %s''' % (title, day, link(
