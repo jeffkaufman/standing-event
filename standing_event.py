@@ -252,7 +252,7 @@ def join(environ, db):
     db.execute('INSERT INTO members (event_id, email, nonce) '
                'VALUES (%s, %s, %s)', (event_id, u_email, member_nonce))
 
-    confirm_url = link('confirm_join', member_nonce)
+    confirm_url = link('view', member_nonce)
 
     send_email(u_email, "Confirm you'd like to join %s" % title, '''\
 To join the regularly scheduled event %s, click:
@@ -267,27 +267,6 @@ your email.  Sorry about that!
 Sent email to %s with instructions on how to join %s.
 ''' % (html_escape(u_email), title))
 
-def confirm_join(environ, db, u_member_nonce):
-    db.execute('SELECT event_id, email FROM members WHERE nonce = %s',
-               (u_member_nonce, ))
-    (event_id, u_email), = db.fetchall()
-    member_nonce = u_member_nonce
-
-    db.execute('UPDATE members SET confirmed = true WHERE nonce = %s',
-               (member_nonce, ))
-
-    event_link = link('view', event_id)
-    unsubscribe = link('unsubscribe', member_nonce)
-
-    return page('Join Confirmed', '''
-%s will now receive email reminders about
-<a href="%s">this regularly scheduled event</a>.
-
-<p>
-
-To unsubscribe, <a href="%s">click here</a>.
-''' % (html_escape(u_email), event_link, unsubscribe))
-
 def unsubscribe(environ, db, u_member_nonce):
     db.execute('SELECT event_id, email FROM members WHERE nonce = %s',
                (u_member_nonce, ))
@@ -298,16 +277,15 @@ def unsubscribe(environ, db, u_member_nonce):
                (member_nonce, ))
 
     event_link = link('view', event_id)
-    confirm_url = link('confirm_join', member_nonce)
 
     return page('Unsubscription Confirmed', '''
 %s will no longer receive email reminders about
-<a href="%s">this regularly scheduled event</a>.
+this regularly scheduled event.
 
 <p>
 
 To re-subscribe, <a href="%s">click here</a>.
-''' % (html_escape(u_email), event_link, confirm_url))
+''' % (html_escape(u_email), event_link))
 
 def matches(day_nth_pairs, consider):
     nth = {
@@ -328,7 +306,35 @@ def matches(day_nth_pairs, consider):
 
     return (day, nth) in day_nth_pairs
 
-def view(environ, db, u_event_id):
+def view(environ, db, u_event_id_or_member_nonce):
+    db.execute('SELECT event_id, email FROM members WHERE nonce = %s',
+               (u_event_id_or_member_nonce, ))
+    results = db.fetchall()
+
+    note = ""
+    member_nonce = ""
+    
+    if len(results) == 1:
+        (event_id, u_email), = results
+        member_nonce = u_event_id_or_member_nonce
+
+        db.execute('UPDATE members SET confirmed = true WHERE nonce = %s',
+                   (member_nonce, ))
+
+        unsubscribe = link('unsubscribe', member_nonce)
+
+        note = '''\
+%s will receive email reminders for this event.
+
+<p>
+
+To unsubscribe, <a href="%s">click here</a>.
+''' % (html_escape(u_email), unsubscribe)
+
+        u_event_id = event_id
+    else:
+        u_event_id = u_event_id_or_member_nonce
+        
     db.execute('SELECT title, confirmed FROM events where event_id=%s',
                (u_event_id, ))
     (title, confirmed),  = db.fetchall()
@@ -354,12 +360,15 @@ def view(environ, db, u_event_id):
 
         consider = now + datetime.timedelta(days=i)
         if matches(recurrences_raw, consider):
-            upcoming_dates.append(consider)
+            upcoming_dates.append(consider.strftime('%F'))
 
     upcoming = '<ul>%s</ul>' % '\n'.join(
-        '<li><a href="%s">%s</a></li>' % (
-            link('view_date', event_id, upcoming_date.strftime('%F')),
-            upcoming_date.strftime('%F'))
+        '<li><a href="%s">%s</a>%s</li>' % (
+            link('view_date', event_id, upcoming_date),
+            upcoming_date,
+            ' (<a href="%s">rsvp</a>)' % link(
+                'rsvp', upcoming_date, member_nonce)
+            if member_nonce else '')
         for upcoming_date in upcoming_dates)
 
     db.execute('SELECT email FROM members '
@@ -547,28 +556,24 @@ def route(path, environ):
                 return join(environ, db)
 
             if path.startswith('/view/'):
-                event_id = path.split('/')[-1]
-                return view(environ, db, event_id)
+                u_event_id_or_member_nonce = path.split('/')[-1]
+                return view(environ, db, u_event_id_or_member_nonce)
 
             if path.startswith('/view_date/'):
-                event_id, date = path.split('/')[-2:]
-                return view_date(environ, db, event_id, date)
+                u_event_id, u_date = path.split('/')[-2:]
+                return view_date(environ, db, u_event_id, u_date)
 
             if path.startswith('/rsvp/'):
-                date, member_nonce = path.split('/')[-2:]
-                return rsvp(environ, db, date, member_nonce)
+                u_date, u_member_nonce = path.split('/')[-2:]
+                return rsvp(environ, db, u_date, u_member_nonce)
 
             if path.startswith('/ical/'):
-                event_id = path.split('/')[-1]
-                return ical(environ, db, event_id)
-
-            if path.startswith('/confirm_join/'):
-                member_nonce = path.split('/')[-1]
-                return confirm_join(environ, db, member_nonce)
+                u_event_id = path.split('/')[-1]
+                return ical(environ, db, u_event_id)
 
             if path.startswith('/unsubscribe/'):
-                member_nonce = path.split('/')[-1]
-                return unsubscribe(environ, db, member_nonce)
+                u_member_nonce = path.split('/')[-1]
+                return unsubscribe(environ, db, u_member_nonce)
 
             return '%r not understood' % html_escape(path)
 
