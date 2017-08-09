@@ -29,19 +29,22 @@ postgres=# CREATE TABLE recurrences (
    day varchar(20) not null,
    nth varchar(20) not null);
 postgres=# CREATE INDEX on recurrences (event_id);
+postgres=# CREATE TABLE users (
+   email varchar(255) primary key not null,
+   nonce char(12) not null);
+postgres=# CREATE INDEX on users (nonce);
 postgres=# CREATE TABLE members (
-    event_id char(12) not null references events(event_id),
-    email varchar(255) not null,
-    nonce char(12) not null,
-    confirmed bool not null default false);
+   event_id char(12) not null references events(event_id),
+   email varchar(255) not null,
+   confirmed bool not null default false);
 postgres=# CREATE INDEX on members (event_id);
 postgres=# CREATE INDEX on members (nonce);
 postgres=# CREATE TABLE rsvps (
-    event_id char(12) not null references events(event_id),
-    email varchar(255) not null,
-    date date not null,
-    attending bool,
-    comment varchar(1024));
+   event_id char(12) not null references events(event_id),
+   email varchar(255) not null,
+   date date not null,
+   attending bool,
+   comment varchar(1024));
 postgres=# CREATE INDEX on rsvps (event_id, date);
 postgres=# CREATE USER $DB_USER PASSWORD '$DB_PASS';
 postgres=# GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO $DB_USER;
