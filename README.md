@@ -1,6 +1,8 @@
 Standing Events
 ===============
 
+The code behind regularlyscheduled.com
+
 Dependencies:
 
     sudo apt-get install python-psycopg2
@@ -9,6 +11,26 @@ Environment variables:
 
     DB_USER
     DB_PASS
+    MAILGUN_API_KEY
+
+A service file would be like:
+
+    [Unit]
+    Description=uWSGI standing event
+
+    [Service]
+    ExecStart=/usr/bin/uwsgi --socket :7093 --plugin /usr/lib/uwsgi/plugins/python_plugin.so --wsgi-file /home/jefftk/standing-event/standing_event.py
+    Restart=always
+    KillSignal=SIGQUIT
+    Type=notify
+    NotifyAccess=all
+
+    Environment=DB_USER=[...]
+    Environment=DB_PASS=[...]
+    Environment=MAILGUN_API_KEY=[...]
+
+    [Install]
+    WantedBy=multi-user.target
 
 Database setup:
 
