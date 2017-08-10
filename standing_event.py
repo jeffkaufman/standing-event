@@ -95,7 +95,7 @@ h1 {
 </style>
 <title>%s :: %s</title>
 <div id=content>
-<h1>%s</h1>
+<center><h1>%s</h1></center>
 %s
 <div id=page>
 %s
@@ -199,8 +199,23 @@ You can ignore this message.  Sorry about that!  ''' % link(
 <i>Sent email to %s with instructions on how to confirm
 this event.</i><p>''' % html_escape(u_form_email)
 
-    active_events = ''
+    owned_section = ''
+    following_section = ''
     if u_email:
+        db.execute('SELECT event_id, title '
+                   '  FROM events'
+                   ' WHERE admin_email = %s'
+                   '   AND confirmed'
+                   ' ORDER BY title',
+                   (u_email, ))
+        owned_events = db.fetchall()
+        if owned_events:
+            owned_section = 'Hosting:<ul>%s</ul><p>' % '\n'.join(
+                '<li><a href="%s">%s</a></li>' % (
+                    link('event', event_id), title)
+                for event_id, title in owned_events)
+        owned_event_ids = set(event_id for event_id, _ in owned_events)
+
         db.execute('SELECT e.event_id, e.title '
                    '  FROM events AS e'
                    '  JOIN members AS m'
@@ -209,12 +224,14 @@ this event.</i><p>''' % html_escape(u_form_email)
                    '   AND m.confirmed'
                    ' ORDER BY e.title',
                    (u_email, ))
-        active_list = db.fetchall()
-        if active_list:
-            active_events = 'Your events:<ul>%s</ul>' % '\n'.join(
+        following_events = db.fetchall()
+        following_event_ids = set(event_id for event_id, _ in following_events)
+        if following_event_ids - owned_event_ids:
+            following_section = 'Following:<ul>%s</ul><p>' % '\n'.join(
                 '<li><a href="%s">%s</a></li>' % (
                     link('event', event_id), title)
-                for event_id, title in active_list)
+                for event_id, title in following_events
+                if event_id not in owned_event_ids)
 
     return page('Schedule a Regular Event', updest=None, body='''
 %s
@@ -247,7 +264,7 @@ function add_another() {
   document.getElementById('selections').appendChild(selection_div);
 }
 </script>
-%s
+%s%s
 ''' % (top_note,
        title_note,
        selection_note,
@@ -255,7 +272,8 @@ function add_another() {
        email_note,
        ' value="%s"' % html_escape(u_email) if u_email else '',
        json.dumps(selection_partial()),
-       active_events))
+       owned_section,
+       following_section))
 
 def nonce():
     # makes a web-safe 12-char nonce
@@ -296,7 +314,7 @@ def unsubscribe(db, u_event_id, u_member_nonce):
         event_id = u_event_id
 
         if confirmed:
-            db.execute('UPDATE members SET confirmed = false '
+            db.execute('DELETE FROM members '
                        'WHERE email = %s AND event_id = %s',
                        (u_email, u_event_id))
             event_link = link('event', event_id, id=member_nonce)
@@ -387,7 +405,7 @@ def event(db, u_event_id, u_email, member_nonce, data):
         member_nonce = create_user(db, u_form_email)
 
         db.execute('INSERT INTO members (event_id, email, confirmed) '
-                   'VALUES (%s, %s, %s)',
+                   'VALUES (%s, %s, %s) ON CONFLICT DO NOTHING',
                    (event_id, u_form_email, bool(confirmed)))
 
         if confirmed:
@@ -397,7 +415,7 @@ def event(db, u_event_id, u_email, member_nonce, data):
         else:
             confirm_url = link('event', event_id, id=member_nonce)
 
-            send_email(u_email, "Confirm you'd like to join %s" % title, '''\
+            send_email(u_form_email, "Confirm you'd like to join %s" % title, '''\
 To join the regularly scheduled event %s, click:
 
     %s
@@ -407,8 +425,8 @@ your email.  Sorry about that!
 ''' % (title, confirm_url))
 
             top_note = '''\
-<i>Sent email to %s with a link to confirm.
-''' % html_escape(u_email)
+<i>Sent email to %s with a link to confirm.</i><p>
+''' % html_escape(u_form_email)
 
     db.execute('SELECT day, nth FROM recurrences WHERE event_id=%s',
                (event_id, ))
@@ -449,6 +467,22 @@ your email.  Sorry about that!
 
     calendar_link = link('ical', event_id)
 
+    db.execute('SELECT admin_email FROM events'
+               ' WHERE event_id = %s',
+               (event_id, ))
+    (u_host_email, ), = db.fetchall()
+
+    cancel = ''
+    if u_email and u_email == u_host_email:
+        cancel = '''\
+<br><br>
+<form action="%s" method=post>
+<input name=member_nonce type=hidden value=%s></text>
+<input name=confirm type=hidden value=false></text>
+<input type=submit value="cancel event">
+</form>''' % (link('confirm_cancel', event_id),
+              member_nonce)
+
     return page(title, '/', '''
 %s
 Happens on:
@@ -457,17 +491,24 @@ Upcoming dates:
 %s
 Members:
 %s
+<p>
+Host: %s
+<p>
 Calendar link: <a href="%s">ical</a><br><br>
 <form method=post>
 <input type=text name=email placeholder=Email%s></text>
 <input type=submit value=join>
+</form>
+%s
 ''' % (
     top_note,
     recurrences,
     upcoming,
     members,
+    html_escape(u_host_email),
     calendar_link,
-    ' value="%s"' % html_escape(u_email) if u_email else ''))
+    ' value="%s"' % html_escape(u_email) if u_email else '',
+    cancel))
 
 def send_emails_for_today():
     with psycopg2.connect(
@@ -528,14 +569,18 @@ def event_date(db, u_event_id, u_date, u_email, member_nonce, u_data):
     (title,), = db.fetchall()
     event_id = u_event_id
 
+    is_member = False
     if u_email:
-        db.execute('SELECT email FROM members'
+        db.execute('SELECT confirmed FROM members'
                    ' WHERE event_id = %s AND email = %s',
                    (event_id, u_email))
-        # verifying that they're a member
-        (_, ), = db.fetchall()
+        response = db.fetchall()
+        if response:
+            (confirmed, ), = response
+            if confirmed:
+                is_member = True
 
-        if u_data:
+        if is_member and u_data:
             u_attending, = u_data['attending']
 
             if 'comment' in u_data:
@@ -597,7 +642,42 @@ def event_date(db, u_event_id, u_date, u_email, member_nonce, u_data):
         current_rsvps = 'No RSVPs yet.'
 
     return page('%s: %s' % (title, date), link('event', event_id), '%s%s<p>%s' % (
-        top_note, rsvp_form, current_rsvps))
+        top_note,
+        rsvp_form if is_member else '',
+        current_rsvps))
+
+def confirm_cancel(db, u_event_id, u_email, member_nonce, u_data):
+    if u_data and u_data['member_nonce'] == [member_nonce]:
+        db.execute('SELECT admin_email FROM events'
+                   ' WHERE admin_email = %s'
+                   '   AND event_id = %s',
+                   (u_email, u_event_id))
+        if db.fetchall():
+            event_id = u_event_id
+            if u_data['confirm'] == ['true']:
+                db.execute('DELETE FROM members WHERE event_id = %s',
+                           (event_id, ))
+                db.execute('DELETE FROM recurrences WHERE event_id = %s',
+                           (event_id, ))
+                db.execute('DELETE FROM rsvps WHERE event_id = %s',
+                           (event_id, ))
+                db.execute('DELETE FROM events WHERE event_id = %s',
+                           (event_id, ))
+                return page('Event Deleted', '/', '')
+            else:
+                return page('Really Delete?', link('event', event_id), '''\
+Really delete this event?  This cannot be undone.
+<p>
+<form action="%s">
+<input type=submit value="no, keep event">
+</form>
+<form method=post>
+<input name=member_nonce type=hidden value=%s></text>
+<input name=confirm type=hidden value=true></text>
+<input type=submit value="yes, cancel event">
+</form>''' % (link('event', event_id), member_nonce))
+
+    return page('Access Denied', link('event', html_escape(u_event_id)), '')
 
 def ical(db, u_event_id):
     db.execute('SELECT title FROM events where event_id=%s',
@@ -702,6 +782,11 @@ def route(u_path, environ):
                 u_rest = u_path[len('/unsubscribe/'):]
                 u_event_id, u_member_nonce = u_rest.split('/')
                 return unsubscribe(db, u_event_id, u_member_nonce)
+
+            if u_path.startswith('/confirm_cancel/'):
+                u_rest = u_path[len('/confirm_cancel/'):]
+                u_event_id, = u_rest.split('/')
+                return confirm_cancel(db, u_event_id, u_email, member_nonce, u_data)
 
             return '%r not understood' % html_escape(u_path)
 

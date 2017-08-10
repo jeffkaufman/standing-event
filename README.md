@@ -27,7 +27,8 @@ postgres=# CREATE TABLE events (
 postgres=# CREATE TABLE recurrences (
    event_id char(12) not null references events(event_id),
    day varchar(20) not null,
-   nth varchar(20) not null);
+   nth varchar(20) not null
+   PRIMARY KEY(event_id, day, nth));
 postgres=# CREATE INDEX on recurrences (event_id);
 postgres=# CREATE TABLE users (
    email varchar(255) primary key not null,
@@ -36,7 +37,8 @@ postgres=# CREATE INDEX on users (nonce);
 postgres=# CREATE TABLE members (
    event_id char(12) not null references events(event_id),
    email varchar(255) not null,
-   confirmed bool not null default false);
+   confirmed bool not null default false,
+   PRIMARY KEY(event_id, email));
 postgres=# CREATE INDEX on members (event_id);
 postgres=# CREATE INDEX on members (nonce);
 postgres=# CREATE TABLE rsvps (
@@ -44,7 +46,8 @@ postgres=# CREATE TABLE rsvps (
    email varchar(255) not null,
    date date not null,
    attending bool,
-   comment varchar(1024));
+   comment varchar(1024),
+   PRIMARY KEY(event_id, email, date));
 postgres=# CREATE INDEX on rsvps (event_id, date);
 postgres=# CREATE USER $DB_USER PASSWORD '$DB_PASS';
 postgres=# GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO $DB_USER;
