@@ -345,7 +345,7 @@ def matches(day_nth_pairs, consider):
         2: 'second',
         3: 'third',
         4: 'fourth',
-        5: 'fifth'}[int(consider.day / 7) + 1]
+        5: 'fifth'}[int((consider.day-1) / 7) + 1]
 
     day = {
         1: 'mondays',
