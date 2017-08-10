@@ -32,6 +32,31 @@ A service file would be like:
     [Install]
     WantedBy=multi-user.target
 
+Nginx config would be like:
+
+    server {
+        server_name www.regularlyscheduled.com;
+        root   /var/www-rs;
+
+        listen 80;
+                listen 443 ssl;
+
+        ssl_certificate /etc/letsencrypt/live/www.jefftk.com-0001/fullchain.pem;
+        ssl_certificate_key /etc/letsencrypt/live/www.jefftk.com-0001/privkey.pem;
+
+        location /.well-known {
+        }
+
+        location /images {
+            root /home/jefftk/standing-event;
+        }
+
+        location / {
+            include uwsgi_params;
+            uwsgi_pass 127.0.0.1:7093;
+        }
+    }
+
 Database setup:
 
 ```

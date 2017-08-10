@@ -68,7 +68,7 @@ body {
 #content {
   background-color: #FFF;
   margin: 0 auto;
-  height: 100%%;
+  min-height: 100%%;
 }
 #page {
   padding: 10px;
@@ -86,7 +86,13 @@ h1 {
   text-decoration: none;
   color: black;
 }
-
+#icalhelp {
+  display: none;
+  padding: 20px;
+}
+img {
+  width: 100%%;
+}
 @media(min-width: 550px) {
   #content {
     width: 550px;
@@ -494,7 +500,27 @@ Members:
 <p>
 Host: %s
 <p>
-Calendar link: <a href="%s">ical</a><br><br>
+Calendar link: <a href="%s">ical</a>
+<span id=showicalhelp>(<a href='#' onclick='icalhelp(); return false;'>help</a>)</span>
+<div id=icalhelp>
+To add to Google calendar:
+<ol>
+    <li>Next to "other calendars" click the down arrow, then "add by url":
+    <br>
+    <img src="/images/other-calendars.png">
+
+    <li>Paste <tt><a href="%s">%s</a></tt> into the url field and click "add calendar".
+    <br>
+    <img src="/images/add-by-url.png">
+</ol>
+</div>
+<script>
+function icalhelp() {
+  document.getElementById('icalhelp').style.display = 'block';
+  document.getElementById('showicalhelp').style.display = 'none';
+}
+</script>
+<p>
 <form method=post>
 <input type=text name=email placeholder=Email%s></text>
 <input type=submit value=join>
@@ -507,6 +533,8 @@ Calendar link: <a href="%s">ical</a><br><br>
     members,
     html_escape(u_host_email),
     calendar_link,
+    calendar_link,
+    html_escape(calendar_link),
     ' value="%s"' % html_escape(u_email) if u_email else '',
     cancel))
 
@@ -800,7 +828,10 @@ def application(environ, start_response):
     u_path = environ['PATH_INFO']
     try:
         output = route(u_path, environ)
-        start_response('200 OK', [('content-type', 'text/html'),
+        content_type = 'text/html'
+        if u_path.startswith('/ical/'):
+            content_type = 'text/calendar'
+        start_response('200 OK', [('content-type', content_type),
                                   ('cache-control', 'no-cache')])
     except Exception as e:
         output = die500(start_response, e)
