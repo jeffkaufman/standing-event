@@ -161,7 +161,7 @@ def index(db, u_email, u_data):
 
     if u_data and not missing:
         u_title, = u_data['title']
-        title = re.sub("[^A-Za-z0-9 .,]", "-", u_title)
+        title = html_escape(re.sub("[^ -~]", "-", u_title))
         title = re.sub("-+", "-", title)
         title = re.sub("^-*", "", title)
         title = re.sub("-*$", "", title)
