@@ -120,6 +120,7 @@ def selection_partial():
   <option value=third>Third</option>
   <option value=fourth>Fourth</option>
   <option value=fifth>Fifth</option>
+  <option value=all>All</option>
 </select>
 <select name=day>
   <option value=mondays>Mondays</option>
@@ -356,7 +357,7 @@ def matches(day_nth_pairs, consider):
         6: 'saturdays',
         7: 'sundays'}[consider.isoweekday()]
 
-    return (day, nth) in day_nth_pairs
+    return (day, nth) in day_nth_pairs or (day, 'all') in day_nth_pairs
 
 def create_user(db, u_email):
     db.execute('INSERT INTO users (email, nonce)'
@@ -381,6 +382,7 @@ def event(db, u_event_id, u_email, member_nonce, data):
                    ' WHERE event_id=%s AND email=%s',
                    (event_id, admin_email))
 
+    is_member = False
     if u_email:
         db.execute('SELECT confirmed FROM members '
                    ' WHERE event_id = %s and email = %s',
@@ -396,6 +398,7 @@ def event(db, u_event_id, u_email, member_nonce, data):
             else:
                 receive = 'receives'
 
+            is_member = True
             top_note = '''\
 <i>%s %s email reminders for this event; <a href="%s">unsubscribe</a></i>.<p>
 ''' % (html_escape(u_email),
@@ -421,7 +424,11 @@ def event(db, u_event_id, u_email, member_nonce, data):
         else:
             confirm_url = link('event', event_id, id=member_nonce)
 
-            send_email(u_form_email, "Confirm you'd like to join %s" % title, '''\
+            if u_email:
+                msg = "%s has invited you to join" % html_escape(u_email)
+            else:
+                msg = "Confirm you'd like to join"
+            send_email(u_form_email, "%s %s" % (msg, title), '''\
 To join the regularly scheduled event %s, click:
 
     %s
@@ -489,9 +496,19 @@ your email.  Sorry about that!
 </form>''' % (link('confirm_cancel', event_id),
               member_nonce)
 
+    join_or_invite = '''\
+<p>
+<form method=post>
+<input type=text name=email placeholder=Email%s></text>
+<input type=submit value=%s>
+</form>
+<p>''' % (
+    (' value="%s"' % html_escape(u_email)) if u_email and not is_member else '',
+    'invite' if is_member else 'join')
+
     return page(title, '/', '''
 %s
-Happens on:
+%sHappens on:
 %s
 Upcoming dates:
 %s
@@ -520,14 +537,10 @@ function icalhelp() {
   document.getElementById('showicalhelp').style.display = 'none';
 }
 </script>
-<p>
-<form method=post>
-<input type=text name=email placeholder=Email%s></text>
-<input type=submit value=join>
-</form>
 %s
 ''' % (
     top_note,
+    join_or_invite,
     recurrences,
     upcoming,
     members,
@@ -535,7 +548,6 @@ function icalhelp() {
     calendar_link,
     calendar_link,
     html_escape(calendar_link),
-    ' value="%s"' % html_escape(u_email) if u_email else '',
     cancel))
 
 def send_emails_for_today():
