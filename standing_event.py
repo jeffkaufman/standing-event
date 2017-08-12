@@ -419,8 +419,9 @@ def event(db, u_event_id, u_email, member_nonce, data):
 
         if confirmed:
             top_note = '''\
-<i>%s will now receive email reminders for this event</i><p>''' % (
-                   html_escape(u_email))
+<i>%s will now receive email reminders for this event; <a href="%s">unsubscribe</a></i><p>''' % (
+    html_escape(u_email),
+    link('unsubscribe', event_id, member_nonce))
         else:
             confirm_url = link('event', event_id, id=member_nonce)
 
@@ -681,7 +682,8 @@ def event_date(db, u_event_id, u_date, u_email, member_nonce, u_data):
     else:
         current_rsvps = 'No RSVPs yet.'
 
-    return page('%s: %s' % (title, date), link('event', event_id), '%s%s<p>%s' % (
+    return page('%s: %s' % (title, date.replace('-', '&#x2011;')),
+                link('event', event_id), '%s%s<p>%s' % (
         top_note,
         rsvp_form if is_member else '',
         current_rsvps))
