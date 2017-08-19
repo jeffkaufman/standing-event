@@ -79,6 +79,7 @@ postgres=# CREATE TABLE recurrences (
 postgres=# CREATE INDEX on recurrences (event_id);
 postgres=# CREATE TABLE users (
    email varchar(255) primary key not null,
+   name varchar(255),
    nonce char(12) not null);
 postgres=# CREATE INDEX on users (nonce);
 postgres=# CREATE TABLE members (
