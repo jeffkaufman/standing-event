@@ -568,8 +568,8 @@ your email.  Sorry about that!
 <input type=submit value=%s>
 </form>
 <p>''' % (
-    (' value="%s"' % html_escape(user.u_email)) if user.u_email and not is_member else '',
     (' value="%s"' % html_escape(user.u_name)) if user.u_name and not is_member else '',
+    (' value="%s"' % html_escape(user.u_email)) if user.u_email and not is_member else '',
     'invite' if is_member else 'join')
 
     return page(title, '/', user, body='''
