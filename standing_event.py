@@ -785,12 +785,12 @@ def confirm_cancel(db, u_event_id, user, u_data):
 Really delete this event?  This cannot be undone.
 <p>
 <form action="%s">
-<input type=submit value="no, keep event">
+<input type=submit value="no, keep event"></input>
 </form>
 <form method=post>
 <input name=user_nonce type=hidden value=%s></text>
 <input name=confirm type=hidden value=true></text>
-<input type=submit value="yes, cancel event">
+<input type=submit value="yes, cancel event"></input>
 </form>''' % (link('event', event_id), user_nonce))
 
     return page('Access Denied', link('event', html_escape(u_event_id)),
@@ -905,6 +905,9 @@ def route(u_path, environ):
             if u_path.startswith('/login'):
                 return login(db, user, u_data)
 
+            if u_path.startswith('/profile'):
+                return profile(db, user, u_data)
+
             if u_path.startswith('/confirm_cancel/'):
                 u_rest = u_path[len('/confirm_cancel/'):]
                 u_event_id, = u_rest.split('/')
@@ -912,6 +915,33 @@ def route(u_path, environ):
                     db, u_event_id, user, u_data)
 
             return '%r not understood' % html_escape(u_path)
+
+def profile(db, user, u_data):
+    if not user.nonce:
+        return '<meta http-equiv="refresh" content="0; url=%s">' % (
+            link('login'))
+
+    top_note = ''
+    if u_data:
+        u_name, = u_data['name']
+        nonce, = u_data['nonce']
+
+        if nonce == user.nonce:
+            db.execute('UPDATE users SET name = %s WHERE nonce = %s',
+                       (u_name, nonce))
+            user.u_name = u_name
+            top_note = '<i>name updated</i><p>'
+
+    return page('Edit User Info', '/', user, '''\
+%s
+<form method=post>
+<input name=name placeholder=Name%s></input>
+<input name=nonce type=hidden value="%s"></input>
+<input type=submit value="Update Name"></input>
+</form>''' % (
+    top_note,
+    (' value=%s' % html_escape(user.u_name)) if user.u_name else '',
+    user.nonce))
 
 def login(db, user, u_data):
     top_note = ''
@@ -942,7 +972,7 @@ You can ignore this message.  Sorry about that!''' % (
 %s
 <form method=post>
 <input name=email placeholder=Email></input>
-<input type=submit value="Send Login Email">
+<input type=submit value="Send Login Email"></input>
 </form>''' % (top_note))
 
 
