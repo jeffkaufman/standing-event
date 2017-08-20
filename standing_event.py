@@ -674,9 +674,9 @@ def event_date(db, u_event_id, u_date, user, u_data):
     date = html_escape(u_date)
     top_note = ''
 
-    db.execute('SELECT title FROM events WHERE event_id = %s',
+    db.execute('SELECT title, admin_email FROM events WHERE event_id = %s',
                (u_event_id, ))
-    (title,), = db.fetchall()
+    (title, admin_email), = db.fetchall()
     event_id = u_event_id
 
     is_member = False
@@ -691,7 +691,13 @@ def event_date(db, u_event_id, u_date, user, u_data):
                 is_member = True
 
         if is_member and u_data:
-            u_attending, = u_data['attending']
+            u_rsvp, = u_data['rsvp']
+
+            if u_rsvp in ['yes', 'no'] or (
+                 u_rsvp == 'cancel' and user.u_email == admin_email):
+                rsvp = u_rsvp
+            else:
+                return 'invalid response'
 
             if 'comment' in u_data:
                 u_comment, = u_data['comment']
@@ -701,40 +707,43 @@ def event_date(db, u_event_id, u_date, user, u_data):
             db.execute('DELETE FROM rsvps WHERE event_id = %s and email = %s', (
                 event_id, user.u_email))
             db.execute('INSERT INTO rsvps '
-                       '(event_id, email, date, attending, comment) '
+                       '(event_id, email, date, rsvp, comment) '
                        'VALUES (%s, %s, %s, %s, %s)', (
-                           event_id, user.u_email, u_date, u_attending == 'yes',
+                           event_id, user.u_email, u_date, rsvp,
                            u_comment))
-            top_note = '<i>RSVPd %s</i><p>' % (
-                'Yes' if u_attending == 'yes' else 'No')
+            if rsvp == 'cancel':
+                top_note = '<i>Cancelled this date</i><p>'
+            else:
 
-    db.execute('SELECT attending, comment FROM rsvps '
+                top_note = '<i>RSVPd %s</i><p>' % rsvp
+
+    db.execute('SELECT rsvp FROM rsvps '
                ' WHERE event_id = %s'
                '   AND email = %s'
                '   AND date = %s',
                (event_id, user.u_email, u_date))
     results = db.fetchall()
     if results:
-        (attending, _), = results
+        (rsvp, ), = results
     else:
-        attending = None
+        rsvp = None
 
     rsvp_form = '''\
 <form method=post>
-<input type=radio name=attending value=yes%s>Yes</input><br>
-<input type=radio name=attending value=no%s>No</input><br>
+<input type=radio name=rsvp value=yes%s>Yes</input><br>
+<input type=radio name=rsvp value=no%s>No</input><br>
 <br>
 <input type=text name=comment placeholder=Comments></input><br>
 <br>
 <input type=submit value=RSVP></submit>
-''' % (' checked' if attending is True else '',
-       ' checked' if attending is False else '')
+''' % (' checked' if rsvp == 'yes' else '',
+       ' checked' if rsvp == 'no' else '')
 
     db.execute('SELECT title FROM events WHERE event_id=%s',
                (event_id, ))
     (title, ), = db.fetchall()
 
-    db.execute('SELECT u.email, r.attending, r.comment, u.name'
+    db.execute('SELECT u.email, r.rsvp, r.comment, u.name'
                ' FROM rsvps AS r'
                ' JOIN users AS u'
                ' ON r.email = u.email'
@@ -743,10 +752,10 @@ def event_date(db, u_event_id, u_date, user, u_data):
     rsvps = ['<li><p>%s: %s%s' % (
         display_name_public(User(u_email=u_member_email,
                                  u_name=u_member_name)),
-        'Yes' if attending else 'No',
+        rsvp,
         ('<blockquote><i>%s</i></blockquote>' % html_escape(u_comment)
          if u_comment else ''))
-             for u_member_email, attending, u_comment, u_member_name in db.fetchall()]
+             for u_member_email, rsvp, u_comment, u_member_name in db.fetchall()]
     date = html_escape(u_date)
 
     if rsvps:

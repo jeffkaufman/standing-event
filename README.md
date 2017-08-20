@@ -93,7 +93,7 @@ postgres=# CREATE TABLE rsvps (
    event_id char(12) not null references events(event_id),
    email varchar(255) not null,
    date date not null,
-   attending bool,
+   rsvp varchar(255),
    comment varchar(1024),
    PRIMARY KEY(event_id, email, date));
 postgres=# CREATE INDEX on rsvps (event_id, date);
