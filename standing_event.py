@@ -1119,6 +1119,8 @@ def die500(start_response, e):
     trb = '%s: %s\n\n%s' % (e.__class__.__name__, e, traceback.format_exc())
     start_response('500 Internal Server Error',
                    [('content-type', 'text/plain')])
+    send_email('jeff@jefftk.com', '[Error] RegularlyScheduled', trb)
+
     return trb
 
 def application(environ, start_response):
