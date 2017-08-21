@@ -4,6 +4,7 @@ import Cookie
 import datetime
 import json
 import os
+import pprint
 import psycopg2
 import re
 import requests
@@ -1115,11 +1116,12 @@ You can ignore this message.  Sorry about that!''' % (
 </form>''' % (top_note))
 
 
-def die500(start_response, e):
+def die500(start_response, e, environ):
     trb = '%s: %s\n\n%s' % (e.__class__.__name__, e, traceback.format_exc())
     start_response('500 Internal Server Error',
                    [('content-type', 'text/plain')])
-    send_email('jeff@jefftk.com', '[Error] RegularlyScheduled', trb)
+    send_email('jeff@jefftk.com', '[Error] RegularlyScheduled',
+               trb + '\n' + pprint.pformat(environ))
 
     return trb
 
@@ -1133,7 +1135,7 @@ def application(environ, start_response):
         start_response('200 OK', [('content-type', content_type),
                                   ('cache-control', 'no-cache')])
     except Exception as e:
-        output = die500(start_response, e)
+        output = die500(start_response, e, environ)
 
     return (output.encode('utf8'), )
 
