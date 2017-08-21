@@ -104,6 +104,7 @@ h1 {
   background-color: #CCC;
   padding: 10px;
   padding-top: 0px;
+  padding-bottom: 7px;
 }
 #up {
   background-color: #DFDFDF;
@@ -123,6 +124,9 @@ img {
   #content {
     width: 550px;
   }
+}
+.strikethrough {
+  text-decoration: line-through;
 }
 </style>
 <title>%s :: %s</title>
@@ -157,7 +161,7 @@ def selection_partial():
   <option value=thursdays>Thursdays</option>
   <option value=fridays>Fridays</option>
   <option value=saturdays>Saturdays</option>
-  <option value=sundasy>Sundays</option>
+  <option value=sundays>Sundays</option>
 </select>
 <button type=button onclick='remove({n})'>remove</button>
 </div>
@@ -506,7 +510,7 @@ your email.  Sorry about that!
                             html_escape(u_day))
         for u_day, u_nth in recurrences_raw)
 
-    now = datetime.datetime.now()
+    today = datetime.date.today()
     upcoming_dates = []
 
     # Select up to five occurrences in next 90 days.
@@ -514,14 +518,22 @@ your email.  Sorry about that!
         if len(upcoming_dates) >= 5:
             break
 
-        consider = now + datetime.timedelta(days=i)
+        consider = today + datetime.timedelta(days=i)
         if matches(recurrences_raw, consider):
-            upcoming_dates.append(consider.strftime('%F'))
+            upcoming_dates.append(consider)
+
+    db.execute('SELECT date'
+               ' FROM rsvps'
+               ' WHERE rsvp = %s'
+               ' AND date IN %s',
+               ('cancel', tuple(upcoming_dates)))
+    cancelled_dates = set(date for (date,) in db.fetchall())
 
     upcoming = '<ul>%s</ul>' % '\n'.join(
-        '<li><a href="%s">%s</a></li>' % (
-            link('event', event_id, upcoming_date),
-            upcoming_date)
+        '<li><a href="%s"%s>%s</a></li>' % (
+            link('event', event_id, upcoming_date.strftime('%F')),
+            ' class=strikethrough' if upcoming_date in cancelled_dates else '',
+            upcoming_date.strftime('%F'))
             for upcoming_date in upcoming_dates)
 
     db.execute('SELECT u.email, u.name '
@@ -622,7 +634,7 @@ def send_emails_for_today(*emails):
         " password='%s'" % (os.environ['DB_USER'],
                             os.environ['DB_PASS'])) as conn:
         with conn.cursor() as db:
-            advance = datetime.datetime.now() + datetime.timedelta(
+            advance = datetime.date.today() + datetime.timedelta(
                 days=ADVANCE_DAYS)
             advance_date = advance.strftime('%F')
 
@@ -636,6 +648,11 @@ def send_emails_for_today(*emails):
                 db.execute('SELECT title FROM events WHERE event_id=%s',
                            (event_id, ))
                 (title, ), = db.fetchall()
+
+                db.execute('SELECT date FROM rsvps'
+                           ' WHERE rsvp = %s AND date = %s',
+                           ('cancel', advance_date))
+                is_cancelled = bool(db.fetchall())
 
                 cmd = ('SELECT u.email, u.nonce '
                        ' FROM members AS m'
@@ -658,26 +675,43 @@ def send_emails_for_today(*emails):
                     for u_email, user_nonce in db.fetchall())
                 if recipient_variables:
                     day = advance.strftime('%A')
-                    send_emails(list(recipient_variables.keys()),
-                                'Reminder: %s is this %s; rsvp?' % (
-                                    title, day),
-                                '''\
+                    date_link = link(
+                        'event', event_id, advance_date,
+                        id='%recipient.user_nonce%')
+                    if is_cancelled:
+                        subject = "%s isn't happening this %s" % (
+                            title, day)
+                        body = '''\
+%s would normally be this %s (%s), but it's cancelled this time
+
+details: %s''' % (
+    title, day, advance_date, date_link)
+                    else:
+                        subject = 'Reminder: %s is this %s; rsvp?' % (
+                            title, day),
+                        body = '''\
 %s is this %s.  RSVP:
 
-    %s''' % (title, day, link(
-        'event', event_id, advance_date,
-        id='%recipient.user_nonce%')),
-                                recipient_variables)
+    %s''' % (title, day, date_link)
+
+                    send_emails(list(recipient_variables.keys()),
+                                subject, body, recipient_variables)
+
 
 
 def event_date(db, u_event_id, u_date, user, u_data):
-    date = html_escape(u_date)
+    if not re.match('^\d\d\d\d-\d\d-\d\d$', u_date):
+        return 'Invalid request'
+    date = u_date
+
     top_note = ''
 
     db.execute('SELECT title, admin_email FROM events WHERE event_id = %s',
                (u_event_id, ))
     (title, admin_email), = db.fetchall()
     event_id = u_event_id
+
+    is_admin = user.u_email == admin_email
 
     is_member = False
     if user.u_email:
@@ -693,8 +727,7 @@ def event_date(db, u_event_id, u_date, user, u_data):
         if is_member and u_data:
             u_rsvp, = u_data['rsvp']
 
-            if u_rsvp in ['yes', 'no'] or (
-                 u_rsvp == 'cancel' and user.u_email == admin_email):
+            if u_rsvp in ['yes', 'no'] or (u_rsvp == 'cancel' and is_admin):
                 rsvp = u_rsvp
             else:
                 return 'invalid response'
@@ -704,24 +737,110 @@ def event_date(db, u_event_id, u_date, user, u_data):
             else:
                 u_comment = None
 
-            db.execute('DELETE FROM rsvps WHERE event_id = %s and email = %s', (
-                event_id, user.u_email))
+            db.execute('SELECT FROM rsvps'
+                       ' WHERE event_id = %s'
+                       ' AND date = %s'
+                       ' AND rsvp = %s', (
+                           event_id, date, 'cancel'))
+            was_cancelled = bool(db.fetchall())
+            db.execute('DELETE FROM rsvps'
+                       ' WHERE event_id = %s '
+                       ' AND email = %s '
+                       ' AND date = %s', (
+                           event_id, user.u_email, date))
             db.execute('INSERT INTO rsvps '
                        '(event_id, email, date, rsvp, comment) '
                        'VALUES (%s, %s, %s, %s, %s)', (
-                           event_id, user.u_email, u_date, rsvp,
+                           event_id, user.u_email, date, rsvp,
                            u_comment))
             if rsvp == 'cancel':
-                top_note = '<i>Cancelled this date</i><p>'
-            else:
+                if was_cancelled:
+                    top_note = '<i>This date was already cancelled.</i>'
+                else:
+                    db.execute('SELECT u.email, u.nonce '
+                               ' FROM members AS m'
+                               ' JOIN users AS u'
+                               '   ON m.email = u.email'
+                               ' JOIN rsvps as r'
+                               '   ON r.email = u.email'
+                               '  AND r.date = %s'
+                               '  AND r.event_id = m.event_id'
+                               ' WHERE m.confirmed = true'
+                               '   AND m.event_id = %s'
+                               '   AND r.rsvp = %s',
+                               (date, event_id, 'yes'))
+                    results = list(db.fetchall())
+                    note_suffix = ''
+                    if results:
+                        recipient_variables = dict(
+                            (u_email, {'user_nonce': user_nonce})
+                            for u_email, user_nonce in results)
+                        date_link = link(
+                            'event', event_id, date,
+                            id='%recipient.user_nonce%')
+                        send_emails(list(recipient_variables.keys()),
+                                    '%s has been cancelled for %s' % (
+                                        title, date),
+                                    '''\
+%s would normally be %s and you RSVP'd yes, but it was just cancelled.
 
-                top_note = '<i>RSVPd %s</i><p>' % rsvp
+details: %s''' % (
+    title, date, date_link),
+                                    recipient_variables)
+                        note_suffix = (' and emailed %s member%s who had already'
+                                       ' said they were coming' % (
+                                           len(results),
+                                           '%s' if len(results) > 1 else ''))
+                    top_note = '<i>Cancelled this date%s</i><p>' % note_suffix
+
+            else:
+                if is_admin and was_cancelled:
+                    db.execute('SELECT u.email, u.nonce '
+                               ' FROM members AS m'
+                               ' JOIN users AS u'
+                               '   ON m.email = u.email'
+                               ' WHERE m.confirmed = true'
+                               '   AND m.event_id = %s'
+                               '   AND u.email != %s'
+                               '   AND u.email NOT IN'
+                               '   (SELECT r.email FROM rsvps AS r'
+                               '     WHERE r.event_id = m.event_id'
+                               '       AND r.rsvp = %s'
+                               '       AND r.date = %s)',
+                               (event_id, user.u_email, 'no', date))
+                    results = list(db.fetchall())
+                    note_suffix = ''
+                    if results:
+                        recipient_variables = dict(
+                            (u_email, {'user_nonce': user_nonce})
+                            for u_email, user_nonce in results)
+                        date_link = link(
+                            'event', event_id, date,
+                            id='%recipient.user_nonce%')
+                        send_emails(list(recipient_variables.keys()),
+                                    '%s is no longer cancelled for %s' % (
+                                        title, date),
+                                    '''\
+%s had been cancelled for %s but is back on.
+
+details: %s''' % (
+    title, date, date_link),
+                                    recipient_variables)
+                        note_suffix = (
+                            ', emailing %s member%s to let them know the'
+                            ' event is back on' % (
+                            len(results), 's' if len(results) > 1 else ''))
+                    top_note = '<i>Un-cancelled this instance and RSVPd %s%s</i><p>' % (
+                        rsvp, note_suffix)
+
+                else:
+                    top_note = '<i>RSVPd %s</i><p>' % rsvp
 
     db.execute('SELECT rsvp FROM rsvps '
                ' WHERE event_id = %s'
                '   AND email = %s'
                '   AND date = %s',
-               (event_id, user.u_email, u_date))
+               (event_id, user.u_email, date))
     results = db.fetchall()
     if results:
         (rsvp, ), = results
@@ -732,12 +851,15 @@ def event_date(db, u_event_id, u_date, user, u_data):
 <form method=post>
 <input type=radio name=rsvp value=yes%s>Yes</input><br>
 <input type=radio name=rsvp value=no%s>No</input><br>
+%s
 <br>
 <input type=text name=comment placeholder=Comments></input><br>
 <br>
 <input type=submit value=RSVP></submit>
 ''' % (' checked' if rsvp == 'yes' else '',
-       ' checked' if rsvp == 'no' else '')
+       ' checked' if rsvp == 'no' else '',
+       '<input type=radio name=rsvp value=cancel%s>Cancel</input><br>' % (
+           ' checked' if rsvp == 'cancel' else '') if is_admin else '')
 
     db.execute('SELECT title FROM events WHERE event_id=%s',
                (event_id, ))
@@ -748,25 +870,33 @@ def event_date(db, u_event_id, u_date, user, u_data):
                ' JOIN users AS u'
                ' ON r.email = u.email'
                ' WHERE r.event_id=%s AND r.date=%s '
-               ' ORDER by u.email ASC', (event_id, u_date))
-    rsvps = ['<li><p>%s: %s%s' % (
-        display_name_public(User(u_email=u_member_email,
-                                 u_name=u_member_name)),
-        rsvp,
-        ('<blockquote><i>%s</i></blockquote>' % html_escape(u_comment)
-         if u_comment else ''))
-             for u_member_email, rsvp, u_comment, u_member_name in db.fetchall()]
-    date = html_escape(u_date)
+               ' ORDER by u.email ASC', (event_id, date))
+    rsvps = []
+    cancelled = False
+    for u_member_email, rsvp, u_comment, u_member_name in db.fetchall():
+        if rsvp == 'cancel':
+            cancelled = True
+        rsvps.append('<li><p>%s: %s%s' % (
+            display_name_public(User(u_email=u_member_email,
+                                     u_name=u_member_name)),
+            rsvp,
+            ('<blockquote><i>%s</i></blockquote>' % html_escape(u_comment)
+             if u_comment else '')))
 
     if rsvps:
         current_rsvps = '<ul>%s</ul>' % '\n'.join(rsvps)
     else:
         current_rsvps = 'No RSVPs yet.'
 
+    cancellation_message = ''
+    if cancelled:
+        cancellation_message = '<b>This date is cancelled</b><p>'
+
     return page('%s: %s' % (title, date.replace('-', '&#x2011;')),
                 link('event', event_id),
-                user, body='%s%s<p>%s' % (
+                user, body='%s%s%s<p>%s' % (
         top_note,
+        cancellation_message,
         rsvp_form if is_member else '',
         current_rsvps))
 
