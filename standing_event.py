@@ -201,7 +201,7 @@ def index(db, user, u_data):
         title = re.sub("-*$", "", title)
 
         u_form_email, = u_data['email']
-        u_form_email, = u_data['name']
+        u_form_name, = u_data['name']
         if not u_data['day'] or len(u_data['day']) != len(u_data['nth']):
             raise Exception('invalid nth-day pairs')
 
@@ -286,6 +286,7 @@ this event.</i><p>''' % html_escape(u_form_email)
 <br>
 <button type=button onclick='add_another()'>add another</button>
 <br><br>
+<input type=text name=name placeholder=Name%s></input>
 %s<input type=text name=email placeholder=Email%s></input>
 <br><br>
 <input type=submit value=create></input>
@@ -311,6 +312,7 @@ function add_another() {
        title_note,
        selection_note,
        selection_partial().replace('{n}', '1'),
+       ' value="%s"' % html_escape(user.u_name) if user.u_name else '',
        email_note,
        ' value="%s"' % html_escape(user.u_email) if user.u_email else '',
        json.dumps(selection_partial()),
