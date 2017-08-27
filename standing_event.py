@@ -933,7 +933,7 @@ Really delete this event?  This cannot be undone.
 <input name=user_nonce type=hidden value=%s></text>
 <input name=confirm type=hidden value=true></text>
 <input type=submit value="yes, cancel event"></input>
-</form>''' % (link('event', event_id), user_nonce))
+</form>''' % (link('event', event_id), user.nonce))
 
     return page('Access Denied', link('event', html_escape(u_event_id)),
                 user, body='')
