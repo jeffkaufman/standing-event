@@ -528,8 +528,9 @@ your email.  Sorry about that!
     db.execute('SELECT date'
                ' FROM rsvps'
                ' WHERE rsvp = %s'
-               ' AND date IN %s',
-               ('cancel', tuple(upcoming_dates)))
+               ' AND date IN %s'
+               ' AND event_id = %s',
+               ('cancel', tuple(upcoming_dates), event_id))
     cancelled_dates = set(date for (date,) in db.fetchall())
 
     upcoming = '<ul>%s</ul>' % '\n'.join(
@@ -653,8 +654,10 @@ def send_emails_for_today(*emails):
                 (title, ), = db.fetchall()
 
                 db.execute('SELECT date FROM rsvps'
-                           ' WHERE rsvp = %s AND date = %s',
-                           ('cancel', advance_date))
+                           ' WHERE rsvp = %s'
+                           ' AND date = %s'
+                           ' AND event_id = %s',
+                           ('cancel', advance_date, event_id))
                 is_cancelled = bool(db.fetchall())
 
                 cmd = ('SELECT u.email, u.nonce '
