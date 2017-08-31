@@ -684,6 +684,12 @@ def send_emails_for_today(*emails):
                     date_link = link(
                         'event', event_id, advance_date,
                         id='%recipient.user_nonce%')
+                    unsub = '''\
+
+
+To unbsubscribe from this event, click here: %s''' % (
+    link('unsubscribe', event_id, '%recipient.user_nonce%'))
+
                     if is_cancelled:
                         subject = "%s isn't happening this %s" % (
                             title, day)
@@ -701,7 +707,7 @@ details: %s''' % (
     %s''' % (title, day, date_link)
 
                     send_emails(list(recipient_variables.keys()),
-                                subject, body, recipient_variables)
+                                subject, body + unsub, recipient_variables)
 
 
 
