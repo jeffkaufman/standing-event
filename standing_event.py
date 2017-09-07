@@ -498,7 +498,8 @@ To join the regularly scheduled event %s, click:
     %s
 
 If you don't know what this is about, someone else must have entered
-your email.  Sorry about that!
+your email.  Sorry about that!  Feel free to ignore this message, and
+we won't send you more messages about this event.
 ''' % (title, confirm_url))
 
             top_note = '''\
