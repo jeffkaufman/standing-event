@@ -1,4 +1,5 @@
 import base64
+import calendar
 import cgi
 import Cookie
 import datetime
@@ -153,6 +154,7 @@ def selection_partial():
   <option value=third>Third</option>
   <option value=fourth>Fourth</option>
   <option value=fifth>Fifth</option>
+  <option value=last>Last</option>
   <option value=all>All</option>
 </select>
 <select name=day>
@@ -405,6 +407,11 @@ def matches(day_nth_pairs, consider):
         5: 'fridays',
         6: 'saturdays',
         7: 'sundays'}[consider.isoweekday()]
+
+    if (day, 'last') in day_nth_pairs:
+        _, last_day = calendar.monthrange(consider.year, consider.month)
+        if consider.day > last_day - 7:
+            return True
 
     return (day, nth) in day_nth_pairs or (day, 'all') in day_nth_pairs
 
