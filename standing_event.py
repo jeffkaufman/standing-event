@@ -1,6 +1,7 @@
 import base64
 import calendar
 import cgi
+from collections import defaultdict
 import Cookie
 import datetime
 import json
@@ -891,12 +892,12 @@ details: %s''' % (
                ' ON r.email = u.email'
                ' WHERE r.event_id=%s AND r.date=%s '
                ' ORDER by u.email ASC', (event_id, date))
-    rsvps = []
+    rsvps = defaultdict(list)  # working here
     cancelled = False
     for u_member_email, rsvp, u_comment, u_member_name in db.fetchall():
         if rsvp == 'cancel':
             cancelled = True
-        rsvps.append('<li><p>%s: %s%s' % (
+        rsvps[rsvp].append('<li><p>%s: %s%s' % (
             display_name_public(User(u_email=u_member_email,
                                      u_name=u_member_name)),
             rsvp,
@@ -904,7 +905,14 @@ details: %s''' % (
              if u_comment else '')))
 
     if rsvps:
-        current_rsvps = '<ul>%s</ul>' % '\n'.join(rsvps)
+        counts_str = '<p><b>%s:</b><p>' % (', '.join(
+            '%s %s' % (len(rsvps[rsvp]), rsvp) for rsvp in ['yes', 'no']))
+
+        rsvps_strs = []
+        for rsvp in ['cancel', 'yes', 'no']:
+            rsvps_strs.append('\n'.join(rsvps.pop(rsvp, [])))
+        assert not rsvps
+        current_rsvps = '%s<ul>%s</ul>' % (counts_str, '\n'.join(rsvps_strs))
     else:
         current_rsvps = 'No RSVPs yet.'
 
