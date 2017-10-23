@@ -445,7 +445,11 @@ def event(db, u_event_id, user, data):
     top_note = ''
     db.execute('SELECT title, admin_email, confirmed FROM events where event_id=%s',
                (u_event_id, ))
-    (title, admin_email, confirmed),  = db.fetchall()
+    try:
+        (title, admin_email, confirmed),  = db.fetchall()
+    except ValueError:
+        return 'Event not found'
+
     event_id = u_event_id
     if not confirmed:
         db.execute('UPDATE events SET confirmed=true WHERE event_id=%s',
@@ -729,7 +733,11 @@ def event_date(db, u_event_id, u_date, user, u_data):
 
     db.execute('SELECT title, admin_email FROM events WHERE event_id = %s',
                (u_event_id, ))
-    (title, admin_email), = db.fetchall()
+    try:
+        (title, admin_email), = db.fetchall()
+    except ValueError:
+        return "Event not found"
+
     event_id = u_event_id
 
     is_admin = user.u_email == admin_email
