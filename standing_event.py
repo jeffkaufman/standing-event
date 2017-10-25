@@ -974,7 +974,11 @@ Really delete this event?  This cannot be undone.
 def ical(db, u_event_id):
     db.execute('SELECT title FROM events where event_id=%s',
                (u_event_id, ))
-    (title, ),  = db.fetchall()
+    try:
+        (title, ),  = db.fetchall()
+    except ValueError:
+        return 'Event not found'
+
     event_id = u_event_id
 
     db.execute('SELECT day, nth FROM recurrences WHERE event_id=%s',
