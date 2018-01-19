@@ -926,7 +926,7 @@ details: %s''' % (
 
     cancellation_message = ''
     if cancelled:
-        cancellation_message = '<b>This date is cancelled</b><p>'
+        cancellation_message = '<big><big><font color=red><b>This date is cancelled</b></font></big></big><p>'
 
     return page('%s: %s' % (title, date.replace('-', '&#x2011;')),
                 link('event', event_id),
