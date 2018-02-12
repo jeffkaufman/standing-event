@@ -786,24 +786,29 @@ def event_date(db, u_event_id, u_date, user, u_data):
                 if was_cancelled:
                     top_note = '<i>This date was already cancelled.</i>'
                 else:
-                    db.execute('SELECT u.email, u.nonce '
+                    db.execute('SELECT u.email, u.nonce, r.rsvp '
                                ' FROM members AS m'
                                ' JOIN users AS u'
                                '   ON m.email = u.email'
-                               ' JOIN rsvps as r'
+                               ' LEFT JOIN rsvps as r'
                                '   ON r.email = u.email'
                                '  AND r.date = %s'
                                '  AND r.event_id = m.event_id'
                                ' WHERE m.confirmed = true'
                                '   AND m.event_id = %s'
-                               '   AND r.rsvp = %s',
+                               '   AND (r.rsvp IS NULL or r.rsvp = %s)',
                                (date, event_id, 'yes'))
                     results = list(db.fetchall())
                     note_suffix = ''
+
                     if results:
+                        had_rsvpd = {'yes': "RSVP'd yes",
+                                     None: "hadn't RSVP'd yet"}
+
                         recipient_variables = dict(
-                            (u_email, {'user_nonce': user_nonce})
-                            for u_email, user_nonce in results)
+                            (u_email, {'user_nonce': user_nonce,
+                                       'had_rsvpd': had_rsvpd[rsvp]})
+                            for u_email, user_nonce, rsvp in results)
                         date_link = link(
                             'event', event_id, date,
                             id='%recipient.user_nonce%')
@@ -811,15 +816,15 @@ def event_date(db, u_event_id, u_date, user, u_data):
                                     '%s has been cancelled for %s' % (
                                         title, date),
                                     '''\
-%s would normally be %s and you RSVP'd yes, but it was just cancelled.
+%s would normally be %s and you %%recipient.had_rsvpd%%, but it was just cancelled.
 
 details: %s''' % (
     title, date, date_link),
                                     recipient_variables)
                         note_suffix = (' and emailed %s member%s who had already'
-                                       ' said they were coming' % (
+                                       ' said they were coming or hadn\'t rsvpd yet.' % (
                                            len(results),
-                                           '%s' if len(results) > 1 else ''))
+                                           's' if len(results) > 1 else ''))
                     top_note = '<i>Cancelled this date%s</i><p>' % note_suffix
 
             else:
