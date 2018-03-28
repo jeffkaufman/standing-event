@@ -171,7 +171,7 @@ def selection_partial():
 </div>
 '''
 
-def index(db, user, u_data):
+def index(db, user, u_data, redirect_urls):
     red_star = '<font color=red>*</font>&nbsp;'
     title_note = selection_note = email_note = ''
 
@@ -226,8 +226,7 @@ def index(db, user, u_data):
                    (event_id, u_form_email, bool(confirmed)))
 
         if confirmed:
-            return '<meta http-equiv="refresh" content="0; url=%s">' % link(
-                'event', event_id)
+            return redirect(link('event', event_id), redirect_urls)
         else:
             send_email(u_form_email, 'Confirm your regularly scheduled event, %s' % title,
                    '''\
@@ -381,16 +380,14 @@ To re-subscribe, <a href="%s">click here</a>.
 this regularly scheduled event.
     ''' % html_escape(user.u_email))
 
-def logout(db, user, u_user_nonce):
+def logout(db, user, u_user_nonce, headers, redirect_urls):
     if not user.nonce:
         return page('Not Logged In', '/', User(), body='Already not logged in.')
     elif user.nonce != u_user_nonce:
         return 'Invalid Link'
 
-    return '''\
-<meta http-equiv="set-cookie" content="id=''; Path=/">
-<meta http-equiv="refresh" content="0; url=/">
-'''
+    headers.append(('Set-Cookie', "id=''; Path=/"))
+    return redirect('/', redirect_urls)
 
 def matches(day_nth_pairs, consider):
     nth = {
@@ -1015,7 +1012,12 @@ END:VEVENT''' % (
     upcoming_date,
     title) for upcoming_date in upcoming_dates)
 
-def route(u_path, environ):
+def redirect(url, redirect_urls):
+    redirect_urls.append(url)
+    return 'redirecting you to <a href="%s">%s</a>' % (
+        html_escape(url), html_escape(url))
+
+def route(u_path, environ, headers, redirect_urls):
     with psycopg2.connect(
         "dbname='standing-events' user='%s' host='localhost'"
         " password='%s'" % (os.environ['DB_USER'],
@@ -1030,10 +1032,9 @@ def route(u_path, environ):
                     if db.fetchall():
                         if u_path.startswith('/'):
                             u_path = u_path[1:]
-                        return '''\
-<meta http-equiv="set-cookie" content="id=%s; Path=/">
-<meta http-equiv="refresh" content="0; url=%s">
-''' % (u_user_nonce, link(html_escape(u_path)))
+                        headers.append(('Set-Cookie',
+                                        "id=%s; Path=/" % u_user_nonce))
+                        return redirect(link(u_path), redirect_urls)
 
             user = User()
             if 'HTTP_COOKIE' in environ:
@@ -1057,7 +1058,7 @@ def route(u_path, environ):
                 u_data = {}
 
             if u_path in ['', '/']:
-                return index(db, user, u_data)
+                return index(db, user, u_data, redirect_urls)
 
             if u_path.startswith('/event/'):
                 u_rest = u_path[len('/event/'):]
@@ -1084,13 +1085,13 @@ def route(u_path, environ):
             if u_path.startswith('/logout/'):
                 u_rest = u_path[len('/logout/'):]
                 u_user_nonce, = u_rest.split('/')
-                return logout(db, user,  u_user_nonce)
+                return logout(db, user,  u_user_nonce, headers, redirect_urls)
 
             if u_path.startswith('/login'):
                 return login(db, user, u_data)
 
             if u_path.startswith('/profile'):
-                return profile(db, user, u_data)
+                return profile(db, user, u_data, redirect_urls)
 
             if u_path.startswith('/confirm_cancel/'):
                 u_rest = u_path[len('/confirm_cancel/'):]
@@ -1100,10 +1101,9 @@ def route(u_path, environ):
 
             return '%r not understood' % html_escape(u_path)
 
-def profile(db, user, u_data):
+def profile(db, user, u_data, redirect_urls):
     if not user.nonce:
-        return '<meta http-equiv="refresh" content="0; url=%s">' % (
-            link('login'))
+        return redirect(link('login'), redirect_urls)
 
     top_note = ''
     if u_data:
@@ -1172,12 +1172,24 @@ def die500(start_response, e, environ):
 def application(environ, start_response):
     u_path = environ['PATH_INFO']
     try:
-        output = route(u_path, environ)
-        content_type = 'text/html'
-        if u_path.startswith('/ical/'):
-            content_type = 'text/calendar'
-        start_response('200 OK', [('content-type', content_type),
-                                  ('cache-control', 'no-cache')])
+        headers = []
+        redirect_urls = []
+        output = route(u_path, environ, headers, redirect_urls)
+
+        if not redirect_urls:
+            content_type = 'text/html'
+            if u_path.startswith('/ical/'):
+                content_type = 'text/calendar'
+                headers.append(('content-type', content_type))
+            headers.append(('cache-control', 'no-cache'))
+
+        status = '200 OK'
+        if redirect_urls:
+            redirect_url, = redirect_urls
+            status = '302 Found'
+            headers.append(('Location', redirect_url))
+
+        start_response(status, headers)
     except Exception as e:
         output = die500(start_response, e, environ)
 
