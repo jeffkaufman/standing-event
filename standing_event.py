@@ -280,7 +280,14 @@ this event.</i><p>''' % html_escape(u_form_email)
                 if event_id not in owned_event_ids)
 
     return page('Schedule a Regular Event', updest=None, user=user,
-                body='''
+                body='''\
+This is a system for scheduling events that recur on a regular schedule.
+You invite people by email, and once they accept they start getting 
+reminders for upcoming events asking them to RSVP.  Anyone can unsubscribe
+at any time.  There are no accounts; you'll get a link in your email to
+make sure this is really your email address.
+
+<p>
 %s
 <form method=post>
 %s<input type=text name=title placeholder=Title></text>
@@ -1177,6 +1184,10 @@ You can ignore this message.  Sorry about that!''' % (
             top_note = '<i>address not recognized</i><p>'
 
     return page('Log in', '/', user, hide_profile=True, body='''\
+There are no accounts on Regularly Scheduled.  Instead, it sends an email
+to the address you specify, and by clicking through you confirm that you're
+really you.
+<p>
 %s
 <form method=post>
 <input name=email placeholder=Email></input>
