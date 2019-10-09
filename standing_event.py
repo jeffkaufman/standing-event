@@ -16,7 +16,10 @@ import urllib
 
 HOST='https://www.regularlyscheduled.com'
 APP_TITLE='Regularly Scheduled'
-ADVANCE_DAYS=4
+ADVANCE_DAYS=[
+    ('standard', 4),
+    ('reminder', 0),
+]
 MAIL_FROM='Regularly Scheduled <jeff@jefftk.com>'
 MAILGUN_URL='https://api.mailgun.net/v3/mg.regularlyscheduled.com/messages'
 MAILGUN_API_KEY=os.environ['MAILGUN_API_KEY']
@@ -648,77 +651,98 @@ def send_emails_for_today(*emails):
         " password='%s'" % (os.environ['DB_USER'],
                             os.environ['DB_PASS'])) as conn:
         with conn.cursor() as db:
-            advance = datetime.date.today() + datetime.timedelta(
-                days=ADVANCE_DAYS)
-            advance_date = advance.strftime('%F')
+            for advance_type, advance_amount in ADVANCE_DAYS:
+                advance = datetime.date.today() + datetime.timedelta(
+                    days=advance_amount)
+                advance_date = advance.strftime('%F')
 
-            db.execute('SELECT event_id, day, nth from recurrences')
-            to_send_event_ids = set(
-                event_id
-                for event_id, u_day, u_nth in db.fetchall()
-                if matches([(u_day, u_nth)], advance))
+                db.execute('SELECT event_id, day, nth from recurrences')
+                to_send_event_ids = set(
+                    event_id
+                    for event_id, u_day, u_nth in db.fetchall()
+                    if matches([(u_day, u_nth)], advance))
 
-            for event_id in to_send_event_ids:
-                db.execute('SELECT title FROM events WHERE event_id=%s',
-                           (event_id, ))
-                (title, ), = db.fetchall()
+                for event_id in to_send_event_ids:
+                    db.execute('SELECT title FROM events WHERE event_id=%s',
+                               (event_id, ))
+                    (title, ), = db.fetchall()
 
-                db.execute('SELECT date FROM rsvps'
-                           ' WHERE rsvp = %s'
-                           ' AND date = %s'
-                           ' AND event_id = %s',
-                           ('cancel', advance_date, event_id))
-                is_cancelled = bool(db.fetchall())
+                    db.execute('SELECT date FROM rsvps'
+                               ' WHERE rsvp = %s'
+                               ' AND date = %s'
+                               ' AND event_id = %s',
+                               ('cancel', advance_date, event_id))
+                    is_cancelled = bool(db.fetchall())
 
-                cmd = ('SELECT u.email, u.nonce '
-                       ' FROM members AS m'
-                       ' JOIN users AS u'
-                       '   ON m.email = u.email'
-                       ' WHERE m.confirmed = true'
-                       '   AND m.event_id = %s'
-                       '   AND u.email NOT IN ('
-                       '   SELECT email FROM rsvps'
-                       '    WHERE event_id = %s'
-                       '      AND date = %s)')
-                if emails:
-                    db.execute(cmd + ' AND u.email in %s', (
-                        event_id, event_id, advance_date, emails))
-                else:
-                    db.execute(cmd, (event_id, event_id, advance_date))
 
-                recipient_variables = dict(
-                    (u_email, {'user_nonce': user_nonce})
-                    for u_email, user_nonce in db.fetchall())
-                if recipient_variables:
-                    day = advance.strftime('%A')
-                    date_link = link(
-                        'event', event_id, advance_date,
-                        id='%recipient.user_nonce%')
-                    unsub = '''\
+                    cmd = ('SELECT u.email, u.nonce '
+                           ' FROM members AS m'
+                           ' JOIN users AS u'
+                           '   ON m.email = u.email'
+                           ' WHERE m.confirmed = true'
+                           '   AND m.event_id = %s')
+
+                    vals = [event_id, event_id, advance_date]
+                    if advance_type == 'regular':
+                        cmd += ('   AND u.email NOT IN ('
+                                '   SELECT email FROM rsvps'
+                                '    WHERE event_id = %s'
+                                '      AND date = %s)')
+                    else:
+                        vals.append("yes")
+                        cmd += ('   AND u.email IN ('
+                                '   SELECT email FROM rsvps'
+                                '    WHERE event_id = %s'
+                                '      AND date = %s'
+                                '      AND rsvp = %s)')
+
+                    if emails:
+                        vals.append(emails)
+                        db.execute(cmd + ' AND u.email in %s', vals)
+                    else:
+                        db.execute(cmd, vals)
+
+                    recipient_variables = dict(
+                        (u_email, {'user_nonce': user_nonce})
+                        for u_email, user_nonce in db.fetchall())
+                    if recipient_variables:
+                        day = advance.strftime('%A')
+                        date_link = link(
+                            'event', event_id, advance_date,
+                            id='%recipient.user_nonce%')
+                        unsub = '''\
 
 
 To unbsubscribe from this event, click here: %s''' % (
-    link('unsubscribe', event_id, '%recipient.user_nonce%'))
+        link('unsubscribe', event_id, '%recipient.user_nonce%'))
 
-                    if is_cancelled:
-                        subject = "%s isn't happening this %s" % (
-                            title, day)
-                        body = '''\
+                        subject = None
+                        body = None
+
+                        if advance_type == 'regular':
+                            if is_cancelled:
+                                subject = "%s isn't happening this %s" % (title, day)
+                                body = '''\
 %s would normally be this %s (%s), but it's cancelled this time
 
 details: %s''' % (
-    title, day, advance_date, date_link)
-                    else:
-                        subject = 'Reminder: %s is this %s; rsvp?' % (
-                            title, day),
-                        body = '''\
+        title, day, advance_date, date_link)
+                            else:
+                                subject = 'Reminder: %s is this %s; rsvp?' % (title, day),
+                                body = '''\
 %s is this %s.  RSVP:
 
     %s''' % (title, day, date_link)
+                        elif not is_cancelled:
+                            subject = "Reminder: %s is today and you RSVP'd yes" % title
+                            body = '''\
+%s is today and your RSVP is "yes".  Change it here if you need to:
 
-                    send_emails(list(recipient_variables.keys()),
-                                subject, body + unsub, recipient_variables)
+    %s''' % (title, date_link)
 
+                        if subject and body:
+                            send_emails(list(recipient_variables.keys()),
+                                        subject, body + unsub, recipient_variables)
 
 
 def event_date(db, u_event_id, u_date, user, u_data):
