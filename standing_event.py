@@ -620,7 +620,7 @@ Members:
 Host: %s
 <p>
 Calendar link: <a href="%s">ical</a>
-<span id=showicalhelp>(<a href='#' onclick='icalhelp(); return false;'>help</a>)</span>
+<span id=showicalhelp>(<a href='#' onclick='icalhelp(); return false;'>add to Google Calendar</a>)</span>
 <div id=icalhelp>
 To add to Google calendar:
 <ol>
