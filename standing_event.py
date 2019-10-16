@@ -729,7 +729,7 @@ To unbsubscribe from this event, click here: %s''' % (
                         subject = None
                         body = None
 
-                        if advance_type == 'regular':
+                        if advance_type == 'standard':
                             if is_cancelled:
                                 subject = "%s isn't happening this %s" % (title, day)
                                 body = '''\
