@@ -662,6 +662,7 @@ def send_emails_for_today(*emails):
                 advance = datetime.date.today() + datetime.timedelta(
                     days=advance_amount)
                 advance_date = advance.strftime('%F')
+                print("Considering %s for %s" % (advance_type, advance_date))
 
                 db.execute('SELECT event_id, day, nth from recurrences')
                 to_send_event_ids = set(
@@ -673,6 +674,7 @@ def send_emails_for_today(*emails):
                     db.execute('SELECT title FROM events WHERE event_id=%s',
                                (event_id, ))
                     (title, ), = db.fetchall()
+                    print("Matched %s" % title)
 
                     db.execute('SELECT date FROM rsvps'
                                ' WHERE rsvp = %s'
@@ -713,6 +715,7 @@ def send_emails_for_today(*emails):
                         (u_email, {'user_nonce': user_nonce})
                         for u_email, user_nonce in db.fetchall())
                     if recipient_variables:
+                        print ("Sending to %s" % ", ".join(recipient_variables))
                         day = advance.strftime('%A')
                         date_link = link(
                             'event', event_id, advance_date,
