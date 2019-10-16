@@ -692,7 +692,7 @@ def send_emails_for_today(*emails):
                            '   AND m.event_id = %s')
 
                     vals = [event_id, event_id, advance_date]
-                    if advance_type == 'regular':
+                    if advance_type == 'standard':
                         cmd += ('   AND u.email NOT IN ('
                                 '   SELECT email FROM rsvps'
                                 '    WHERE event_id = %s'
